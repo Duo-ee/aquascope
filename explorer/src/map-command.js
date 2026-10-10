@@ -10,7 +10,7 @@
 
 import { $, escapeHtml, state } from "./core.js?v=__BUILD__";
 import { applyActions, renderLog, setLogOpen, undoAll, undoLast } from "./map-actions.js?v=__BUILD__";
-import { askModelConfig, currentContext } from "./ask.js?v=__BUILD__";
+import { askModelConfig, countFreeRun, currentContext } from "./ask.js?v=__BUILD__";
 import { generateJsonLocally, localModelReady, localReaderLabel } from "./local-model.js?v=__BUILD__";
 import { searchStations } from "./search.js?v=__BUILD__";
 import { todayIso } from "./timeline.js?v=__BUILD__";
@@ -97,8 +97,9 @@ async function byDevice(text) {
 }
 
 async function byKey(text) {
-  const cfg = askModelConfig();
+  const cfg = askModelConfig("map");
   if (!cfg) return null;
+  await countFreeRun(cfg, "map");
   say(`<span class="spinner" aria-hidden="true"></span>Asking ${escapeHtml(cfg.label)}…`);
   // The main worker: the provider client lives beside the Analyst there.
   const res = await call("map_command", {
