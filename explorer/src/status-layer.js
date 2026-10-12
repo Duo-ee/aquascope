@@ -36,6 +36,7 @@ let listing = null;
 let shown = null;           // the month on the map
 let wanted = null;          // the month the date asks for
 let failed = null;          // { month } when the last one could not be read
+let pending = null;         // the month being read, so Explain (#562) can wait for it
 let side = 2048;            // the picture's width and height
 let worker = null;          // a Worker, or false once it has failed
 let reqId = 0;
@@ -192,8 +193,12 @@ function draw(objectUrl) {
 
 // Full strength on the world view, fading as you zoom in, where the basemap,
 // the rivers and the gauges are what you came for and a basin is the whole screen.
+// While the rivers carry the same classes (Flow vs normal, #559) the basins step back, or a brown river is lost in
+// a brown basin.
+const UNDER_RIVERS = 0.3;
+
 function opacityByZoom() {
-  const o = state.opacity.status ?? DEFAULT_OPACITY;
+  const o = (state.opacity.status ?? DEFAULT_OPACITY) * (state.flowNormalShown ? UNDER_RIVERS : 1);
   return ["interpolate", ["linear"], ["zoom"], 3, o, 6, o * 0.55, 9, o * 0.3];
 }
 
@@ -236,6 +241,7 @@ function update() {
     console.warn(`status ${month}:`, err && err.message);
     if (wanted === month) { failed = { month }; renderLegend(); }
   });
+  pending = job.catch(() => {});
   holdSettle(job);   // a play waits for the frame (map.js whenSettled)
 }
 
@@ -421,6 +427,20 @@ export function setStatusFocus(classes = []) {
 }
 
 export const getStatusFocus = () => focus.slice();
+
+/** Re-read the layer's opacity: Flow vs normal (#559) fades the basins while it is on. */
+export function refreshStatusOpacity() {
+  if (map && map.getLayer(LAYER_ID)) map.setPaintProperty(LAYER_ID, "raster-opacity", opacityByZoom());
+}
+
+/** Resolves once the month the date asks for is drawn (or failed), for Explain (#562). */
+export const statusReady = () => (state.status && pending ? pending : Promise.resolve());
+
+/** The month on the map and its file, for Explain (#562): { month, url }, or null when none is drawn. */
+export function statusShown() {
+  if (!state.status || !shown) return null;
+  return { month: shown, url: statusUrl(shown) };
+}
 
 export function initStatusLayer(url = {}) {
   side = pictureSize();

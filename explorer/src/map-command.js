@@ -8,8 +8,9 @@
 // Nothing here ever uses a key of ours: with no rule match, no model on the device and no key of the
 // reader's, the box says so and offers examples.
 
-import { $, escapeHtml, state } from "./core.js?v=__BUILD__";
+import { $, actions, escapeHtml, state } from "./core.js?v=__BUILD__";
 import { applyActions, renderLog, setLogOpen, undoAll, undoLast } from "./map-actions.js?v=__BUILD__";
+import { explainView, initMapExplain } from "./map-explain.js?v=__BUILD__";
 import { askModelConfig, currentContext } from "./ask.js?v=__BUILD__";
 import { generateJsonLocally, localModelReady, localReaderLabel } from "./local-model.js?v=__BUILD__";
 import { searchStations } from "./search.js?v=__BUILD__";
@@ -18,6 +19,7 @@ import { call, callLight } from "./worker-client.js?v=__BUILD__";
 
 // A few that show the range, offered when the box opens empty and after a miss.
 export const TRIES = [
+  "What am I seeing?",
   "Trace the Nile to the sea",
   "Where are rivers much above normal?",
   "Play the last 5 years",
@@ -54,6 +56,7 @@ export function openMapAsk({ text = "", tries = true } = {}) {
   $("ma-form").hidden = false;
   $("btn-map-ask").hidden = true;
   $("btn-map-ask").setAttribute("aria-expanded", "true");
+  if ($("btn-map-explain")) $("btn-map-explain").hidden = true;
   const hint = $("map-hint");
   if (hint) hint.hidden = true;
   const input = $("ma-input");
@@ -70,6 +73,7 @@ export function closeMapAsk() {
   $("ma-form").hidden = true;
   $("btn-map-ask").hidden = false;
   $("btn-map-ask").setAttribute("aria-expanded", "false");
+  if ($("btn-map-explain")) $("btn-map-explain").hidden = false;
   showTries(false);
   say("");
   setLogOpen(false);
@@ -135,6 +139,24 @@ async function runCommand(text) {
   try {
     let res = await byRules(words);
     if (my !== run) return;
+    if (res && res.control === "explain") {
+      // "What am I seeing?" (#562): notes pinned on the map, not actions.
+      await explainView({ say });
+      if (my === run) $("ma-input").value = "";
+      return;
+    }
+    if (res && res.control === "review") {
+      // "Review my model" (#564): the checks on the model result on the map drop their pins, as the legend's
+      // "Review these results" does. With no model on the map, say how to put one there.
+      if (actions.reviewModel && actions.hasModel && actions.hasModel()) {
+        await actions.reviewModel({ say });
+        if (my === run) $("ma-input").value = "";
+      } else {
+        say("No model result on the map to review. Drop a HEC-RAS plan (*.p01.hdf) or a UGRID NetCDF file on the " +
+          "map, or use Tools, Open model results.", "warn");
+      }
+      return;
+    }
     if (res && res.control) {
       const n = res.control === "undo_all" ? undoAll() : (undoLast() ? 1 : 0);
       say(n ? (res.control === "undo_all" ? "Every map action undone." : "Undone.") : "Nothing to undo.", "ok");
@@ -219,5 +241,6 @@ export function initMapCommand() {
     e.stopImmediatePropagation();
     openMapAsk();
   }, true);
+  initMapExplain({ say });   // the "Explain this view" button beside the box (#562)
   globalThis.__aq.mapAsk = { run: runCommand, open: openMapAsk, close: closeMapAsk };
 }

@@ -12,7 +12,7 @@
 // ensemble plume (the FEWS view, fews.js).
 
 import { CONFIG } from "../config.js?v=__BUILD__";
-import { $, clickLayers, escapeHtml, onTime, setTime, state } from "./core.js?v=__BUILD__";
+import { $, clickClaimed, clickLayers, escapeHtml, onTime, setTime, state } from "./core.js?v=__BUILD__";
 import { renderCredits } from "./layer-ui.js?v=__BUILD__";
 import { initFews, openReachCard, setFewsVisible } from "./fews.js?v=__BUILD__";
 import { refreshLegend, registerLegendRow } from "./map-legend.js?v=__BUILD__";
@@ -361,6 +361,7 @@ function onClick(e) {
   // A gauge under the pointer is what the reader meant: its own handler opens it.
   const gaugeHit = ["points", "clusters"].filter((id) => map.getLayer(id));
   if (gaugeHit.length && map.queryRenderedFeatures(e.point, { layers: gaugeHit }).length) return;
+  if (clickClaimed(e)) return;   // the reader's own model under the click (#555) answers it
   const f = e.features && e.features[0];
   if (!f) return;
   const id = Number(f.properties.river_id ?? f.properties.riverId);
@@ -378,6 +379,18 @@ function openCard(f, lngLat) {
 
 export function floodsVisible() { return visible; }
 
+/** Resolves once the issue has been read (or found missing), so Explain does not run ahead of it (#562). */
+export const floodsAheadReady = () => (visible ? load() : Promise.resolve());
+
+/**
+ * The issue on the map, for Explain (#562): { issue_date, features } with the reaches inside `inBox(lat, lon)`,
+ * or null when the layer is off or has nothing. The day each reach is classed on is the package's to work out.
+ */
+export function floodsAheadShown(inBox = () => true) {
+  if (!visible || !data || data.manifest.missing || !data.features.length) return null;
+  const features = data.features.filter((f) => inBox(f.geometry.coordinates[1], f.geometry.coordinates[0]));
+  return { issue_date: data.manifest.issue_date, features, truncated: Boolean(data.manifest.geojson_truncated) };
+}
 /** The issue and its reaches once read ({ manifest, features }), for the layers drawn from it: flood depth (#554). */
 export function floodsAheadData() { return load().then(() => data); }
 
