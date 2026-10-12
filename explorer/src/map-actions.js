@@ -10,8 +10,11 @@
 
 import { $, actions, escapeHtml, setTime, state, timeState } from "./core.js?v=__BUILD__";
 import { DEFAULT_CENTER, fitWorldZoom, map } from "./map.js?v=__BUILD__";
-import { ActionLog, BY_LABEL, LAYER_CONTROLS, agoWords, checkPin, slotOf } from "./map-actions-core.js?v=__BUILD__";
+import {
+  ActionLog, BY_LABEL, LAYER_CONTROLS, agoWords, checkPin, inkOn, noteBody, placeNotes, slotOf,
+} from "./map-actions-core.js?v=__BUILD__";
 import { getStatusFocus, setStatusFocus } from "./status-layer.js?v=__BUILD__";
+import { SEVERITY as REVIEW_SEVERITY } from "./mesh-review-core.js?v=__BUILD__";
 import { clearRiverNetwork, lightRiverNetwork } from "./river-map.js?v=__BUILD__";
 import { call, callLight } from "./worker-client.js?v=__BUILD__";
 import { announce } from "./a11y.js?v=__BUILD__";
@@ -19,8 +22,11 @@ import { announce } from "./a11y.js?v=__BUILD__";
 export const log = new ActionLog();
 
 const AREA_SRC = "ai-areas";
-const PIN_SVG = '<svg viewBox="0 0 24 32" aria-hidden="true"><path d="M12 31s10-10.2 10-18A10 10 0 0 0 2 13c0 7.8 10 18 10 18Z"/>' +
-  '<circle cx="12" cy="12.5" r="3.6"/></svg>';
+const PIN_PATH = '<path d="M12 31s10-10.2 10-18A10 10 0 0 0 2 13c0 7.8 10 18 10 18Z"/>';
+const PIN_SVG = `<svg viewBox="0 0 24 32" aria-hidden="true">${PIN_PATH}<circle cx="12" cy="12.5" r="3.6"/></svg>`;
+// A ranked pin (Scout, #563) carries its number where the dot was.
+const rankedPin = (n) => `<svg viewBox="0 0 24 32" aria-hidden="true">${PIN_PATH}` +
+  `<text x="12" y="13" text-anchor="middle" dominant-baseline="central">${n}</text></svg>`;
 
 let river = null;              // the river this module lit: { lat, lon, river_id, direction, label } or null
 const areas = new Map();       // entry id -> { bbox, label, marker }
@@ -79,6 +85,32 @@ const SLOT_WRITERS = {
   basemap: (v) => actions.setBasemap(v),
   river: (v) => { if (v) lightRiver(v); else { river = null; clearRiverNetwork(); } },
 };
+
+/**
+ * A module that paints its own slot (What if, #565) hands the writer that puts a value back on the map, so the
+ * log's undo can restore what was there before: `fn(value)` with null clears it.
+ */
+export function registerSlotWriter(slot, fn) {
+  SLOT_WRITERS[slot] = fn;
+}
+
+/**
+ * Log an action a module has already applied itself (its slot needs a writer: registerSlotWriter), with what it
+ * replaced, so the log lists it and undo puts `before` back. Returns the entry.
+ */
+export function logAction({ action, before = null, after = null, label = "", by = "rules", detail = "", command = "" }) {
+  const slot = slotOf(action);
+  if (!slot || !SLOT_WRITERS[slot]) throw new Error(`no writer for ${action && action.type}`);
+  const entry = log.add({ action, slot, before, after, label: label || action.type, by, detail, command });
+  renderLog();
+  return entry;
+}
+
+/** The value in force on a slot now: the newest live entry's `after`, or null. */
+export function slotValue(slot) {
+  const live = log.live().filter((e) => e.slot === slot);
+  return live.length ? live[live.length - 1].after : null;
+}
 
 function writeSlot(slot, value) {
   if (SLOT_WRITERS[slot]) return SLOT_WRITERS[slot](value);
@@ -143,7 +175,7 @@ function removeArea(id) {
 
 function factLine(f) {
   const v = typeof f.value === "number" ? f.value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : String(f.value);
-  return `${f.label}: ${v}${f.unit ? ` ${f.unit}` : ""}`;
+  return `${f.label}: ${v}${f.unit ? ` ${f.unit}` : ""}${f.when ? ` (${f.when})` : ""}`;
 }
 
 function openPinCard(id) {
@@ -152,28 +184,107 @@ function openPinCard(id) {
   const p = e.after;
   const [first, ...rest] = p.facts || [];
   const v = first && (typeof first.value === "number" ? first.value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : String(first.value));
-  const note = [p.text, ...rest.map(factLine)].filter(Boolean).join(" · ");
+  const isNote = p.kind === "note";
+  const isReview = p.kind === "review";
+  // A note's card leads with its words; the facts they do not already give follow (#562). A scout pin's reason
+  // already says its numbers (all formatted by the package); its facts stay in pins() (#563).
+  const note = isNote ? noteBody(p) : p.rank ? p.text : [p.text, ...rest.map(factLine)].filter(Boolean).join(" · ");
+  const sev = isReview ? REVIEW_SEVERITY[p.severity] || REVIEW_SEVERITY.info : null;
   // The pin's card is what was asked for now: the log folds so the two do not stack (its count reopens it).
   if (logOpen) setLogOpen(false);
   actions.openMapCard({
-    id: `pin:${id}`, lngLat: [p.lon, p.lat], lift: 30,
-    what: `Note, ${BY_LABEL[e.by] || e.by}`, whatIcon: `<span class="ma-pin-mini" aria-hidden="true">${PIN_SVG}</span>`,
-    title: p.title, sub: `${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}`,
-    figure: first ? { value: v, unit: first.unit || "", label: first.label } : null,
-    note, credit: p.source || "",
-    buttons: [{ id: "unpin", label: "Remove pin", title: "Undo this pin", onClick: () => { undoEntry(id); actions.closeMapCard(); } }],
+    id: `pin:${id}`, lngLat: [p.lon, p.lat], lift: isNote ? 14 : 30,
+    what: isReview ? `Review ${p.rank}, ${p.check} · ${BY_LABEL[e.by] || e.by}`
+      : !isNote && p.rank ? `Scout ${p.rank}${p.kind ? `, ${p.kind}` : ""} · ${BY_LABEL[e.by] || e.by}` : `Note, ${BY_LABEL[e.by] || e.by}`,
+    ...(sev ? { status: { text: sev.words, color: sev.colour } } : {}),
+    whatIcon: `<span class="ma-pin-mini" aria-hidden="true">${PIN_SVG}</span>`,
+    title: p.title, sub: [p.place || `${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}`, p.when].filter(Boolean).join(" · "),
+    figure: !isNote && first ? { value: v, unit: first.unit || "", label: first.label } : null,
+    note, credit: p.credit || p.source || "",
+    buttons: [{ id: "unpin", label: isNote ? "Remove note" : isReview ? "Remove this finding" : "Remove pin", title: "Undo this pin",
+      onClick: () => { undoEntry(id); actions.closeMapCard(); } }],
   });
+  // Its callout steps back while the card says the same thing in full.
+  for (const [nid, n] of noteMarkers) n.el.classList.toggle("carded", nid === id);
+}
+
+// A note (Explain, #562): a numbered dot at the place and a short card beside it, on whichever side keeps the
+// cards off each other and off the legend, the box and the time bar (map-actions-core.js placeNotes).
+const noteMarkers = new Map();  // entry id -> { marker, el, pin }
+
+function drawNote(id, pin) {
+  const el = document.createElement("div");
+  el.className = "ma-note side-right";
+  if (pin.tone) { el.style.setProperty("--tone", pin.tone); el.style.setProperty("--tone-ink", inkOn(pin.tone)); }
+  el.innerHTML = `<button type="button" class="ma-note-dot" aria-label="Note ${pin.n || ""}: ${escapeHtml(pin.title)}">` +
+    `${pin.n || ""}</button><div class="ma-note-card"><b class="ma-note-title">${escapeHtml(pin.title)}</b>` +
+    (pin.text ? `<span class="ma-note-text">${escapeHtml(pin.text)}</span>` : "") +
+    (pin.source ? `<span class="ma-note-src">${escapeHtml(pin.source)}</span>` : "") + "</div>";
+  el.addEventListener("click", (ev) => { ev.stopPropagation(); openPinCard(id); });
+  const marker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([pin.lon, pin.lat]).addTo(map);
+  noteMarkers.set(id, { marker, el, pin });
+  pinMarkers.set(id, marker);
+  placeNoteCards();
+}
+
+// The furniture a card should not sit on, in the map's own pixels.
+function furniture(frame) {
+  const out = [];
+  for (const sel of ["#map-legends", "#map-ask .ma-bar", "#ma-status", "#ma-log", "#timebar", "#map-tools", "#map-card",
+    ".map-lead", ".maplibregl-ctrl-bottom-left", ".maplibregl-ctrl-bottom-right"]) {
+    const el = document.querySelector(sel);
+    if (!el || el.hidden) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width && r.height) out.push({ x: r.left - frame.left, y: r.top - frame.top, w: r.width, h: r.height });
+  }
+  return out;
+}
+
+let placing = 0;
+function placeNoteCards() {
+  if (placing || !noteMarkers.size) return;
+  placing = requestAnimationFrame(() => {
+    placing = 0;
+    const frame = map.getContainer().getBoundingClientRect();
+    const list = [...noteMarkers.values()];
+    const points = list.map((n) => map.project([n.pin.lon, n.pin.lat]));
+    const sizes = list.map((n) => {
+      const c = n.el.querySelector(".ma-note-card");
+      return { w: (c && c.offsetWidth) || 200, h: (c && c.offsetHeight) || 60 };
+    });
+    const sides = placeNotes(points, sizes, { w: frame.width, h: frame.height }, furniture(frame));
+    list.forEach((n, i) => {
+      for (const side of ["right", "left", "top", "bottom"]) n.el.classList.toggle(`side-${side}`, side === sides[i]);
+    });
+  });
+}
+
+// A pin from the log: brought into view if it is off screen, then its card opened.
+function showPin(id) {
+  const e = log.get(id);
+  if (!e || e.undone) return;
+  const p = e.after;
+  const b = map.getBounds();
+  if (b && !b.contains([p.lon, p.lat])) map.easeTo({ center: [p.lon, p.lat], duration: 700 });
+  openPinCard(id);
 }
 
 function drawPin(id, pin) {
   if (!state.mapOk || !map) return;
   const old = pinMarkers.get(id);
   if (old) old.remove();
+  noteMarkers.delete(id);
+  if (pin.kind === "note") { drawNote(id, pin); return; }
   const el = document.createElement("button");
   el.type = "button";
-  el.className = "ma-pin";
-  el.innerHTML = PIN_SVG;
-  el.setAttribute("aria-label", `Note: ${pin.title}`);
+  el.className = pin.rank ? "ma-pin ranked" : "ma-pin";
+  el.innerHTML = pin.rank ? rankedPin(pin.rank) : PIN_SVG;
+  el.setAttribute("aria-label", pin.rank ? `${pin.kind === "review" ? "Review" : "Scout"} ${pin.rank}: ${pin.title}` : `Note: ${pin.title}`);
+  if (pin.kind === "review") {
+    // A review pin (#564) wears its severity: red a problem, amber worth a look, blue for information.
+    el.classList.add("review", `sev-${pin.severity}`);
+    el.style.setProperty("--pin", (REVIEW_SEVERITY[pin.severity] || REVIEW_SEVERITY.info).colour);
+  }
   el.title = pin.title;
   el.addEventListener("click", (ev) => { ev.stopPropagation(); openPinCard(id); });
   const marker = new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([pin.lon, pin.lat]).addTo(map);
@@ -184,6 +295,7 @@ function removePin(id) {
   const m = pinMarkers.get(id);
   if (m) m.remove();
   pinMarkers.delete(id);
+  if (noteMarkers.delete(id)) placeNoteCards();
 }
 
 // ── applying one action ─────────────────────────────────────────────────────
@@ -199,7 +311,7 @@ async function snapRiver(a) {
 
 // What the floating pieces cover, so a place lands in the part of the map you can see: the box and its log
 // at the top, the legend stack on the left of a wide screen, the time bar at the bottom.
-function cameraPadding() {
+export function cameraPadding() {
   const frame = map.getContainer().getBoundingClientRect();
   const pad = { top: 70, bottom: 120, left: 60, right: 60 };
   // The box itself, not its log: the log is short-lived and folds away, the place is what you asked for.
@@ -355,6 +467,26 @@ export function addPin(pin, { by = "api", label = "" } = {}) {
   return entry.id;
 }
 
+/**
+ * Refine a pin already on the map (its title or note, as a place name arrives), without a new log entry: the
+ * pin stays where it is and keeps its undo. Returns false for a pin that is gone.
+ */
+export function updatePin(id, pin, { label = "" } = {}) {
+  const e = log.get(id);
+  if (!e || e.undone || !e.action || e.action.type !== "add_pin") return false;
+  const p = checkPin({ ...e.after, ...pin, lat: e.after.lat, lon: e.after.lon });
+  e.after = p;
+  if (label) e.label = label;
+  const m = pinMarkers.get(id);
+  if (m) {
+    const el = m.getElement();
+    el.title = p.title;
+    el.setAttribute("aria-label", p.rank ? `Scout ${p.rank}: ${p.title}` : `Note: ${p.title}`);
+  }
+  log.emit();
+  return true;
+}
+
 /** The pins on the map, oldest first: { id, lat, lon, title, text, facts, source, by, at }. */
 export const pins = () => log.pins();
 
@@ -371,6 +503,7 @@ const ICON = {
   highlight_river: '<path d="M4 18c3 0 3-4 6-4s3 4 6 4 2-3 4-3"/><path d="M4 11c3 0 3-4 6-4s3 4 6 4 2-3 4-3"/>',
   draw_area: '<rect x="4.5" y="5.5" width="15" height="13" rx="1" stroke-dasharray="3 2"/>',
   add_pin: '<path d="M12 21s7-7 7-12a7 7 0 0 0-14 0c0 5 7 12 7 12Z"/><circle cx="12" cy="9" r="2.2"/>',
+  what_if: '<path d="M4 17c3 0 3-3 6-3s3 3 6 3 2-2 4-2"/><path d="M9 4.5a3 3 0 1 1 3 3.5v1.6"/><path d="M12 11.6h.01"/>',
 };
 
 const icon = (type) => `<svg class="ma-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +
@@ -399,8 +532,11 @@ export function renderLog() {
   const rows = live.slice().reverse().map((e) => {
     const by = BY_LABEL[e.by] || e.by;
     const title = [e.command ? `“${e.command}”` : "", e.detail, agoWords(e.at, now)].filter(Boolean).join(" · ");
-    return `<li class="ma-row" data-id="${e.id}">${icon(e.action && e.action.type)}` +
-      `<span class="ma-label" title="${escapeHtml(title)}">${escapeHtml(e.label)}</span>` +
+    const pin = e.action && e.action.type === "add_pin";
+    const label = pin
+      ? `<button type="button" class="ma-label ma-open-pin" data-pin="${e.id}" title="${escapeHtml(title)}">${escapeHtml(e.label)}</button>`
+      : `<span class="ma-label" title="${escapeHtml(title)}">${escapeHtml(e.label)}</span>`;
+    return `<li class="ma-row" data-id="${e.id}">${icon(e.action && e.action.type)}${label}` +
       `<span class="ma-by ma-by-${escapeHtml(e.by)}">${escapeHtml(by)}</span>` +
       `<button type="button" class="ma-undo" data-undo="${e.id}" aria-label="Undo: ${escapeHtml(e.label)}" title="Undo">` +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>' +
@@ -417,6 +553,8 @@ export function initMapActions() {
     box.addEventListener("click", (e) => {
       const one = e.target.closest("[data-undo]");
       if (one) { undoEntry(Number(one.dataset.undo)); return; }
+      const pin = e.target.closest("[data-pin]");
+      if (pin) { showPin(Number(pin.dataset.pin)); return; }
       if (e.target.closest("[data-undo-all]")) undoAll();
     });
   }
@@ -424,7 +562,19 @@ export function initMapActions() {
   if (toggle) toggle.addEventListener("click", () => setLogOpen(!logOpen));
   log.subscribe(() => renderLog());
   // A basemap swap replaces the style: put the drawn areas back on the new one.
-  if (state.mapOk && map) map.on("style.load", () => { if (areas.size) refreshAreas(); });
+  // A closed map card gives a note back its callout.
+  const card = $("map-card");
+  if (card && globalThis.MutationObserver) {
+    new MutationObserver(() => {
+      if (card.hidden) for (const n of noteMarkers.values()) n.el.classList.remove("carded");
+    }).observe(card, { attributes: true, attributeFilter: ["hidden"] });
+  }
+  if (state.mapOk && map) {
+    map.on("style.load", () => { if (areas.size) refreshAreas(); });
+    // The notes' cards find their sides again once the map has moved (#562).
+    map.on("moveend", placeNoteCards);
+    map.on("resize", placeNoteCards);
+  }
   actions.addPin = addPin;
   actions.mapPins = pins;
   actions.removePin = removePinById;
