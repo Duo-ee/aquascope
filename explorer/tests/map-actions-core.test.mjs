@@ -2,7 +2,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ActionLog, BY_LABEL, LAYER_CONTROLS, agoWords, checkPin, slotOf } from "../src/map-actions-core.js";
+import {
+  ActionLog, BY_LABEL, LAYER_CONTROLS, NOTE_SIDES, agoWords, checkPin, inkOn, noteBody, noteRect, placeNotes, slotOf,
+} from "../src/map-actions-core.js";
 import { focusPalette, statusPalette } from "../src/status-core.js";
 
 const fly = (to) => ({ type: "fly_to", bbox: to });
@@ -101,4 +103,60 @@ test("the river status can be painted for some classes only", () => {
   assert.equal(only[5][3], all[5][3], "much above keeps its strength");
   for (const i of [1, 2, 3, 4]) assert.equal(only[i][3], 0, "the others are left off the map");
   assert.deepEqual(only[0], all[0]);
+});
+
+// ── Explain what is on screen (#562): notes ────────────────────────────────
+
+test("a note keeps what its callout and card need, checked", () => {
+  const p = checkPin({
+    lat: 24.5, lon: 94, title: "Below normal", text: "Tan: flow in the 10th to 25th percentile.", kind: "note", n: 2,
+    tone: "#dfc27d", place: "Manipur, India", when: "September 2026", credit: "GEOGLOWS v2, CC BY 4.0", group: "explain",
+    facts: [{ label: "Largest area below normal in view", value: "41%", when: "September 2026" }],
+  });
+  assert.equal(p.kind, "note");
+  assert.equal(p.n, 2);
+  assert.equal(p.tone, "#dfc27d");
+  assert.equal(p.place, "Manipur, India");
+  assert.equal(p.group, "explain");
+  assert.deepEqual(p.facts[0], { label: "Largest area below normal in view", value: "41%", when: "September 2026" });
+  const bad = checkPin({ lat: 1, lon: 1, title: "x", kind: "note", tone: "red;background:url(x)", n: 1.5 });
+  assert.equal(bad.tone, "", "only a plain hex colour");
+  assert.equal(bad.n, 0);
+  assert.equal(checkPin({ lat: 1, lon: 1, title: "x" }).kind, undefined, "a plain pin stays a pin");
+});
+
+test("a note's card gives its words, then the facts they leave out", () => {
+  const pin = {
+    text: "Dark teal: flow above the 90th percentile for September, on 23% of the mapped land in view.",
+    when: "September 2026",
+    facts: [
+      { label: "Largest area much above normal in view", value: "23%", when: "September 2026" },
+      { label: "Its size", value: "660,000 km²", when: "September 2026" },
+      { label: "Gauges in view much above normal today", value: "5", when: "on 9 Oct" },
+    ],
+  };
+  assert.equal(noteBody(pin), `${pin.text} · Its size: 660,000 km² · Gauges in view much above normal today: 5 (on 9 Oct)`);
+});
+
+test("the number on a dot is dark on the pale classes and white on the deep ones", () => {
+  for (const pale of ["#dfc27d", "#80cdc1", "#f2c94c"]) assert.equal(inkOn(pale), "#0f1c26", pale);
+  for (const deep of ["#a6611a", "#018571", "#8b5cf6", "#4a148c", "#33475a"]) assert.equal(inkOn(deep), "#ffffff", deep);
+  assert.equal(inkOn("not a colour"), "#ffffff");
+});
+
+test("note cards go on the side that keeps them off each other and off the map's furniture", () => {
+  const size = { w: 200, h: 60 };
+  assert.deepEqual(noteRect({ x: 100, y: 100 }, size, "right"), { x: 114, y: 70, w: 200, h: 60 });
+  assert.deepEqual(noteRect({ x: 100, y: 100 }, size, "top"), { x: 0, y: 26, w: 200, h: 60 });
+  const frame = { w: 1000, h: 700 };
+  // Alone in the middle: to the right.
+  assert.deepEqual(placeNotes([{ x: 500, y: 300 }], [size], frame), ["right"]);
+  // Near the right edge: to the left, inside the frame.
+  assert.deepEqual(placeNotes([{ x: 950, y: 300 }], [size], frame), ["left"]);
+  // Two side by side: neither card covers the other's point, so they open away from each other.
+  assert.deepEqual(placeNotes([{ x: 400, y: 300 }, { x: 520, y: 300 }], [size, size], frame), ["left", "right"]);
+  // A legend on the right of a point pushes its card elsewhere.
+  const legend = { x: 510, y: 200, w: 300, h: 200 };
+  assert.notEqual(placeNotes([{ x: 500, y: 300 }], [size], frame, [legend])[0], "right");
+  assert.deepEqual(NOTE_SIDES, ["right", "left", "top", "bottom"]);
 });

@@ -149,6 +149,17 @@ header#top {
   padding: .65rem; background: var(--bg); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-2);
 }
+/* Tools > Data status (#593): one line, open for every scheduled job */
+.data-status { border-top: 1px solid var(--line-soft); padding-top: .4rem; font-size: .74rem; max-width: 300px; }
+.data-status summary { cursor: pointer; color: var(--ink-2); }
+.ds-list { list-style: none; margin: .35rem 0 0; padding: 0; display: grid; gap: .2rem; }
+.ds-list li { display: grid; grid-template-columns: 8px auto 1fr; align-items: center; gap: .4rem; }
+.ds-list i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.ds-list .ds-ok i { background: var(--ok-ink); }
+.ds-list .ds-stale i, .ds-list .ds-failing i { background: var(--err-ink); }
+.ds-name { white-space: nowrap; }
+.ds-age { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ds-list .ds-stale .ds-age, .ds-list .ds-failing .ds-age { color: var(--err-ink); }
 .entry-routes { display: flex; flex-direction: column; align-items: stretch; gap: .65rem; margin: 1.2rem 0; }
 .entry-routes .btn { text-align: left; white-space: normal; padding: .8rem; }
 
@@ -1360,13 +1371,15 @@ main { overflow: clip; }
    not a data colour, so they never read as a gauge or a status class. */
 .map-ask {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 8;
-  width: min(460px, calc(100% - 150px)); display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: min(580px, calc(100% - 150px)); display: flex; flex-direction: column; align-items: center; gap: 6px;
   pointer-events: none;
 }
 .map-ask > * { pointer-events: auto; }
-.ma-bar { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+/* Three pills and the log's count: a pill never squeezes onto two lines; on a narrow map the count wraps under. */
+.ma-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; width: 100%; }
 .ma-open {
   font: inherit; font-size: .8rem; font-weight: 560; color: var(--ink-2); display: inline-flex; align-items: center; gap: .45rem;
+  flex: none; white-space: nowrap;
   height: 34px; padding: 0 .55rem 0 .7rem; border-radius: 999px; border: 1px solid var(--line); cursor: pointer;
   background: var(--surface); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow-1);
 }
@@ -1464,6 +1477,25 @@ main { overflow: clip; }
 .ma-pin svg path { fill: #22313f; stroke: #fff; stroke-width: 1.6; }
 .ma-pin svg circle { fill: #fff; }
 .ma-pin:hover svg path, .ma-pin:focus-visible svg path { fill: var(--blue); }
+/* Scout (#563): the pins are numbered, most worth a look first; the number is the pin's dot. */
+.ma-pin.ranked svg { width: 28px; height: 37px; }
+.ma-pin.ranked svg text {
+  fill: #fff; font: 700 10.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.ma-pin.ranked:hover svg text, .ma-pin.ranked:focus-visible svg text { fill: #fff; }
+.ma-scout svg { color: var(--ink-2); }
+.ma-scout.busy svg { animation: ma-scan 1.1s ease-in-out infinite; }
+.ma-scout.busy { cursor: progress; }
+@keyframes ma-scan { 0%, 100% { transform: translateX(-1.5px); } 50% { transform: translateX(1.5px); } }
+@media (prefers-reduced-motion: reduce) { .ma-scout.busy svg { animation: none; opacity: .55; } }
+.map-ask.open .ma-scout { display: none; }
+/* The scout's line takes the caption's place while it shows. */
+.map-ask:has(> .ma-status:not([hidden])) ~ .map-lead { visibility: hidden; }
+.ma-open-pin {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer;
+}
+.ma-open-pin:hover { color: var(--blue-dark); text-decoration: underline; text-underline-offset: 2px; }
 .ma-pin-mini svg { width: 11px; height: 14px; display: block; }
 .ma-pin-mini svg path { fill: currentColor; }
 .ma-pin-mini svg circle { fill: var(--surface-solid); }
@@ -1474,9 +1506,17 @@ main { overflow: clip; }
 /* The caption and the first-visit hint (.map-lead) step below the pill, and step aside while the box is open. */
 @media (min-width: 641px) { .map-lead { top: 52px; } }
 .map-ask.open ~ .map-lead { visibility: hidden; }
+/* An answer under the closed box (Explain, #562) takes the caption's place while it shows. */
+.map-ask:has(> .ma-status:not([hidden])) ~ .map-lead { visibility: hidden; }
 @media (max-width: 1100px) {
   .map-ask { width: min(420px, calc(100% - 340px)); }
   .map-ask.open { width: min(460px, calc(100% - 120px)); }
+}
+/* A tablet: the legends sit top left (floods-past.css), so the closed pills take the map to their right and drop
+   the shortcut key; open, the box is centred and wide as before. */
+@media (min-width: 641px) and (max-width: 1100px) {
+  .map-ask:not(.open) { left: 340px; right: 56px; width: auto; transform: none; }
+  .ma-open kbd { display: none; }
 }
 /* A phone: a round button bottom right, above the panel handle; open, the bar takes the top of the map. */
 @media (max-width: 640px) {
@@ -1494,3 +1534,39 @@ main { overflow: clip; }
   .ma-row { padding-top: .32rem; padding-bottom: .32rem; }
 }
 @media print { .map-ask, .ma-pin, .ma-area-tag { display: none !important; } }
+
+/* Explain what is on screen (#562): a note is a numbered dot at its place, in the colour of what it describes
+   (a status class, a flood class, a gauge's class, the news orange), with a short card beside it. The card's
+   side is chosen in map-actions.js so the cards stay off each other and off the legend, the box and the bar. */
+.ma-explain svg { color: var(--ink-2); }
+/* No position here: MapLibre places the marker absolutely, which also anchors the card. */
+.ma-note { width: 22px; height: 22px; --tone: #33475a; cursor: pointer; }
+.ma-note:hover, .ma-note:focus-within { z-index: 2; }
+.ma-note.carded .ma-note-card { display: none; }
+.ma-note-dot {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  font: inherit; font-size: .68rem; font-weight: 700; color: var(--tone-ink, #fff); font-variant-numeric: tabular-nums;
+  background: var(--tone); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(15, 28, 38, .35), 0 2px 6px rgba(15, 28, 38, .28);
+}
+.ma-note-dot:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.ma-note-card {
+  position: absolute; width: 220px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 9px 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--line);
+  border-left: 3px solid var(--tone); background: var(--surface); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-1); color: var(--ink-2); font-size: .72rem; line-height: 1.35; text-align: left;
+}
+.ma-note:hover .ma-note-card { background: var(--surface-solid); box-shadow: var(--shadow-2); }
+.ma-note-title { color: var(--ink); font-size: .76rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ma-note-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ma-note-src { color: var(--muted); font-size: .62rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ma-note.side-right .ma-note-card { left: calc(50% + 14px); top: 50%; transform: translateY(-50%); }
+.ma-note.side-left .ma-note-card { right: calc(50% + 14px); top: 50%; transform: translateY(-50%); }
+.ma-note.side-top .ma-note-card { bottom: calc(50% + 14px); left: 50%; transform: translateX(-50%); }
+.ma-note.side-bottom .ma-note-card { top: calc(50% + 14px); left: 50%; transform: translateX(-50%); }
+/* A phone: the title alone, a tap opens the whole note in the map card. */
+@media (max-width: 640px) {
+  .ma-note-card { width: 136px; padding: 3px 7px 3px 8px; }
+  .ma-note-text, .ma-note-src { display: none; }
+  .ma-note-title { font-size: .7rem; }
+}
+@media print { .ma-note { display: none !important; } }

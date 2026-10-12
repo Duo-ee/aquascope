@@ -238,11 +238,8 @@ _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", 
 _RED_TO_CLASS = {c["rgb"][0]: i + 1 for i, c in enumerate(STATUS_CLASSES)}
 
 
-def _tiff_red(data: bytes) -> Any:
-    """The red band of a status file as a (height, width) uint8 array: a tiled, deflated, little-endian
-    GeoTIFF with one plane per band, which is how GEOGLOWS writes them (checked on 2026-09 and 1990-01)."""
-    import numpy as np
-
+def _tiff_tags(data: bytes) -> dict[int, list[int]]:
+    """The integer tags of a little-endian TIFF's first image."""
     if data[:4] != b"II*\x00":
         raise ValueError("not a little-endian TIFF")
     (ifd,) = struct.unpack_from("<I", data, 4)
@@ -258,13 +255,44 @@ def _tiff_red(data: bytes) -> Any:
             tags[tag] = list(struct.unpack_from(f"<{count}{fmt}", data, ifd + 10 + 12 * i))
         else:
             tags[tag] = list(struct.unpack_from(f"<{count}{fmt}", data, value))
+    return tags
+
+
+def status_shape(data: bytes) -> tuple[int, int]:
+    """(height, width) of a status file, read from its header alone (7200 x 3600 for GEOGLOWS's)."""
+    tags = _tiff_tags(data)
+    return tags[257][0], tags[256][0]
+
+
+def _tiff_red(data: bytes, rows: Any = None, cols: Any = None) -> Any:
+    """The red band of a status file as a (height, width) uint8 array: a tiled, deflated, little-endian
+    GeoTIFF with one plane per band, which is how GEOGLOWS writes them (checked on 2026-09 and 1990-01).
+
+    With ``rows`` and ``cols`` (index arrays into the full grid), only those cells, as a (len(rows),
+    len(cols)) array, and only the tiles that hold them are decompressed (explaining one view, #562)."""
+    import numpy as np
+
+    tags = _tiff_tags(data)
     width, height = tags[256][0], tags[257][0]
     if tags.get(259, [1])[0] not in (8, 32946) or tags.get(284, [1])[0] != 2 or tags.get(317, [1])[0] != 1:
         raise ValueError("unexpected TIFF layout (want deflate, planar, no predictor)")
     tw, th = tags[322][0], tags[323][0]
     across, down = -(-width // tw), -(-height // th)
-    out = np.zeros((down * th, across * tw), dtype=np.uint8)
     offsets, counts = tags[324], tags[325]
+    if rows is not None and cols is not None:
+        rows, cols = np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64)
+        part = np.zeros((len(rows), len(cols)), dtype=np.uint8)
+        trow, tcol = rows // th, cols // tw
+        for tr in np.unique(trow):
+            rsel = np.nonzero(trow == tr)[0]
+            for tc in np.unique(tcol):
+                csel = np.nonzero(tcol == tc)[0]
+                t = int(tr) * across + int(tc)
+                tile = np.frombuffer(zlib.decompress(data[offsets[t]:offsets[t] + counts[t]]), dtype=np.uint8)
+                tile = tile.reshape(th, tw)
+                part[np.ix_(rsel, csel)] = tile[np.ix_(rows[rsel] - int(tr) * th, cols[csel] - int(tc) * tw)]
+        return part
+    out = np.zeros((down * th, across * tw), dtype=np.uint8)
     for t in range(across * down):        # the red plane is the first across * down tiles
         tile = np.frombuffer(zlib.decompress(data[offsets[t]:offsets[t] + counts[t]]), dtype=np.uint8)
         r, c = divmod(t, across)
@@ -272,14 +300,15 @@ def _tiff_red(data: bytes) -> Any:
     return out[:height, :width]
 
 
-def status_classes(data: bytes) -> Any:
-    """A status file as classes, 0 for no data and 1 (much below normal) to 5 (much above)."""
+def status_classes(data: bytes, rows: Any = None, cols: Any = None) -> Any:
+    """A status file as classes, 0 for no data and 1 (much below normal) to 5 (much above); with ``rows`` and
+    ``cols``, only those cells of the 0.05 degree grid (row 0 at 90 N, column 0 at 180 W)."""
     import numpy as np
 
     lut = np.zeros(256, dtype=np.uint8)
     for red, k in _RED_TO_CLASS.items():
         lut[red] = k
-    return lut[_tiff_red(data)]
+    return lut[_tiff_red(data, rows, cols)]
 
 
 def region_shares(classes: Any) -> list[dict[str, Any]]:

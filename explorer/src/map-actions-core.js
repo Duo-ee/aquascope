@@ -14,6 +14,8 @@
 export const LAYER_CONTROLS = {
   status: "toggle-status",
   floods_past: "toggle-floods-past",
+  groundwater: "toggle-groundwater",
+  water_balance: "toggle-water-balance",
   floods_ahead: "toggle-floods",
   flood_depth: "toggle-depth",
   rivers: "toggle-rivers",
@@ -48,6 +50,7 @@ export function slotOf(action, id) {
     case "highlight_river": return "river";
     case "draw_area": return `area:${id}`;
     case "add_pin": return `pin:${id}`;
+    case "what_if": return "whatif";   // one what-if painted at a time (#565); a new run replaces it
     default: return null;
   }
 }
@@ -63,14 +66,107 @@ export function checkPin(p) {
   if (!title) throw new Error("a pin needs a title");
   const facts = Array.isArray(p.facts) ? p.facts.slice(0, 8)
     .filter((f) => f && f.label !== undefined && f.value !== undefined && f.value !== null)
-    .map((f) => ({ label: String(f.label).slice(0, 60), value: f.value, ...(f.unit ? { unit: String(f.unit).slice(0, 20) } : {}) }))
+    .map((f) => ({
+      label: String(f.label).slice(0, 60), value: f.value,
+      ...(f.unit ? { unit: String(f.unit).slice(0, 20) } : {}),
+      ...(f.when ? { when: String(f.when).slice(0, 40) } : {}),
+    }))
     : [];
-  return {
+  // A rank (Scout, #563) is drawn in the pin; a kind says which layer the note is about.
+  const rank = Number(p.rank);
+  const out = {
     lat: Math.round(lat * 1e5) / 1e5, lon: Math.round(lon * 1e5) / 1e5, title,
     text: p.text ? String(p.text).replace(/\s+/g, " ").trim().slice(0, 600) : "",
     facts,
-    source: p.source ? String(p.source).slice(0, 200) : "",
+    source: p.source ? String(p.source).slice(0, 320) : "",
+    ...(Number.isInteger(rank) && rank >= 1 && rank <= 99 ? { rank } : {}),
+    ...(p.kind ? { kind: String(p.kind).slice(0, 40) } : {}),
   };
+  // A note (Explain, #562) is drawn as a short callout on the map rather than a pin you must open.
+  if (p.kind === "note") {
+    out.kind = "note";
+    out.n = Number.isInteger(p.n) && p.n > 0 && p.n < 100 ? p.n : 0;
+    out.tone = /^#[0-9a-f]{6}$/i.test(String(p.tone || "")) ? String(p.tone) : "";
+    out.place = p.place ? String(p.place).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    out.when = p.when ? String(p.when).slice(0, 40) : "";
+    out.credit = p.credit ? String(p.credit).slice(0, 400) : "";
+    out.group = p.group ? String(p.group).slice(0, 40) : "";
+  }
+  // A review finding (#564) flags cells of the user's model: which mesh, which cells, how severe.
+  if (p.kind === "review") {
+    out.kind = "review";
+    out.severity = ["problem", "warning", "info"].includes(p.severity) ? p.severity : "info";
+    out.check = p.check ? String(p.check).slice(0, 40) : "";
+    out.mesh = p.mesh ? String(p.mesh).slice(0, 200) : "";
+    out.cells = Array.isArray(p.cells) ? p.cells.slice(0, 5000).map(Number).filter((c) => Number.isInteger(c) && c >= 0) : [];
+  }
+  return out;
+}
+
+/**
+ * What a note's map card says under its title (#562): the note's words, then each fact it cites that the title
+ * and words do not already give, as "label: value", with its date only when it differs from the note's.
+ */
+export function noteBody(pin) {
+  const text = String((pin && pin.text) || "");
+  const said = `${(pin && pin.title) || ""} ${text}`;
+  const extra = ((pin && pin.facts) || []).filter((f) => !said.toLowerCase().includes(String(f.value).toLowerCase()))
+    .map((f) => `${f.label}: ${f.value}${f.unit ? ` ${f.unit}` : ""}${f.when && f.when !== pin.when ? ` (${f.when})` : ""}`);
+  return [text, ...extra].filter(Boolean).join(" · ");
+}
+
+// ── where each note's card goes (#562) ─────────────────────────────────────
+
+/** The ink for a number on a dot of colour `hex`: dark on the pale classes (tan, light teal, the 2-year yellow). */
+export function inkOn(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+  if (!m) return "#ffffff";
+  const lin = (v) => { const c = parseInt(v, 16) / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin(m[1]) + 0.7152 * lin(m[2]) + 0.0722 * lin(m[3]);
+  // Whichever of white and the page's ink has more contrast on it.
+  return (L + 0.05) / (0.0137 + 0.05) > 1.05 / (L + 0.05) ? "#0f1c26" : "#ffffff";
+}
+
+export const NOTE_SIDES = ["right", "left", "top", "bottom"];
+
+/** The box a note's card takes on `side` of its point, `gap` px from it. */
+export function noteRect(pt, size, side, gap = 14) {
+  const { w, h } = size;
+  if (side === "left") return { x: pt.x - gap - w, y: pt.y - h / 2, w, h };
+  if (side === "top") return { x: pt.x - w / 2, y: pt.y - gap - h, w, h };
+  if (side === "bottom") return { x: pt.x - w / 2, y: pt.y + gap, w, h };
+  return { x: pt.x + gap, y: pt.y - h / 2, w, h };
+}
+
+const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
+  Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+/**
+ * Which side of its point each note's card goes on, so the cards cover neither each other, nor another note's
+ * point, nor the map's own furniture (`avoid`: the legend, the time bar, the box), and stay inside `frame`
+ * ({w, h}). `points` are [{x, y}] on screen, `sizes` [{w, h}] in the same order; earlier notes choose first.
+ * Pure, so node tests it. Returns one of NOTE_SIDES per note.
+ */
+export function placeNotes(points, sizes, frame, avoid = [], { gap = 14, dot = 12 } = {}) {
+  const placed = [];
+  const dots = points.map((p) => ({ x: p.x - dot, y: p.y - dot, w: 2 * dot, h: 2 * dot }));
+  return points.map((pt, i) => {
+    let best = NOTE_SIDES[0], bestScore = Infinity;
+    for (const side of NOTE_SIDES) {
+      const r = noteRect(pt, sizes[i], side, gap);
+      const inside = Math.max(0, Math.min(r.x + r.w, frame.w) - Math.max(r.x, 0)) *
+        Math.max(0, Math.min(r.y + r.h, frame.h) - Math.max(r.y, 0));
+      let score = 3 * (r.w * r.h - inside);
+      for (const o of placed) score += 2 * overlap(r, o);
+      for (const [j, d] of dots.entries()) if (j !== i) score += 2 * overlap(r, d);
+      for (const a of avoid) score += overlap(r, a);
+      // Right reads first, then left: a small nudge, so ties keep the cards beside their points.
+      score += NOTE_SIDES.indexOf(side) * 0.5;
+      if (score < bestScore) { best = side; bestScore = score; }
+    }
+    placed.push(noteRect(pt, sizes[i], best, gap));
+    return best;
+  });
 }
 
 export class ActionLog {

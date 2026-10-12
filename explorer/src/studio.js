@@ -916,7 +916,7 @@ async function start(text, { intake: given = null } = {}) {
   S.proseLine = null;
   S.freeRefused = false;
   setBusy(true);
-  note(state.workerReady ? "" : "Loading Python in your browser (about 15 MB, once)…");
+  note(state.workerReady ? "" : "Loading Python in your browser (about 30 MB, once)…");
   try {
     // A study on the free tier is counted before it starts; past the day's allowance it runs keyless.
     const cfg = S.useKey ? askModelConfig("study") : null;
@@ -1648,7 +1648,7 @@ export async function openSharedStudy({ link = null, studyUrl = null } = {}) {
     renderAll();
     return;
   }
-  note(state.workerReady ? "" : "Loading Python in your browser (about 15 MB, once)…");
+  note(state.workerReady ? "" : "Loading Python in your browser (about 30 MB, once)…");
   let res;
   try {
     res = await call("studio", link ? { op: "open_link", token: link }

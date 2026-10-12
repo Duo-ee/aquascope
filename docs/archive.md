@@ -19,6 +19,7 @@ Parquet bundle per variable and source** for whole-source reads. See
 | `stations.parquet` | GeoParquet 1.0 (WKB point geometry, WGS84). One row per station: `source`, `station_id`, `name`, `latitude`, `longitude`, `variables`, `period_start`, `period_end`, `url`, `river`, `country`, `agency`, `license`, `redistributable`, `extra`. |
 | `stations.geojson` | the same rows as GeoJSON, for tools and browsers that don't read parquet |
 | `health.json` | per-source status of the last run: station count, seconds, error message if the endpoint failed |
+| `health/jobs/<job>.json`, `health/jobs/index.json` | every scheduled job's last run, last success, last failure, counts, data date and expected cadence (see [Job health](#job-health)) |
 | `README.md` | the dataset card, regenerated on every run, with the per-source licence table |
 | `obs/<variable>/<source>/<station_id>.csv.gz` | daily values for one station (`date,value`; discharge m3/s, water and groundwater level m, precipitation mm/day), only for redistributable sources |
 | `obs/<variable>/<source>.parquet` | the folder above as one Parquet bundle: `station_id, date, value`, sorted, snappy; `station_id` joins to `stations.parquet` |
@@ -224,7 +225,7 @@ days old. It writes only under `forecasts/`; the catalogue and the observations 
 | --- | --- | --- |
 | `forecasts/status/latest.parquet` | each live gauge's flow today against normal: `source`, `station_id`, `value_date`, `value`, `percentile`, `class`, `n_years` (the Explorer's "Today vs normal" colouring) | derived from the mirrored observations |
 | `forecasts/status/latest.json` | when the snapshot was made, the sources it covers, the count per class | |
-| `forecasts/status/<date>.parquet` | the same snapshot, kept by date | |
+| `forecasts/status/<date>.parquet` | the same snapshot, kept by date (every day; see [retention](#retention-of-the-daily-files)) | |
 | `forecasts/issued/<date>.parquet` | for up to 250 of those gauges with a snapped GEOGLOWS reach: the GEOGLOWS and GloFAS forecasts as issued that day, one row per gauge, model and valid day, the ensemble statistics raw and (GEOGLOWS) corrected to the gauge, the GEOGLOWS run's start date (`init_date`) and the lead day from it, the correction's hindcast KGE, the reach-to-gauge mean-flow ratio, and the gauge's own 2- to 100-year flows (`gauge_q2` to `gauge_q100`) | GEOGLOWS v2 and Open-Meteo (GloFAS v4) output, both CC BY 4.0 |
 | `forecasts/reaches.parquet` | each gauge's GEOGLOWS `river_id`, the snap distance and the GloFAS cell used; IDs only, no geometry | |
 | `forecasts/manifest.json` | every issue date, how many gauges, and how many were dropped and why (the daily cap, the time budget, no fresh value, no river reach) | |
@@ -246,7 +247,7 @@ annual maxima of daily flow since 1940). It writes only under `forecasts/warning
 | --- | --- | --- |
 | `forecasts/warnings/latest.parquet` | every reach expected to reach its 2-year flow in the 15 days: `river_id`, `lat`, `lon`, `strahler_order`, `area_km2`, `peak_cms`, `peak_date`, `rp` (the class, in years), `share` (members that agree), `q2` to `q100`, `daily` (one class per day) and `gauges` | CC BY-NC-SA 4.0 (the forecast is CC BY 4.0; the return periods' own metadata says CC BY-NC-SA 4.0) |
 | `forecasts/warnings/latest.geojson` | the same reaches as slim points for the Explorer, at most 10,000, highest class first | as above |
-| `forecasts/warnings/<date>.parquet` | the same table, kept by the forecast's start date | as above |
+| `forecasts/warnings/<date>.parquet` | the same table, kept by the forecast's start date ([retention](#retention-of-the-daily-files): the last 60 days, then the first of each month) | as above |
 | `forecasts/warnings/manifest.json` | the issue date, counts by class, reaches checked, the method, the thresholds, what it is not, the licences and the issue history | |
 
 Reaches whose 2-year flow is under 5 m3/s (mostly dry desert channels) are not classed, unless a gauge is on them. The cost: the forecast's
@@ -255,6 +256,86 @@ so order 5 and up is 3,401 of the 9,970 chunks (about 54 GB a day, streamed and 
 time budget stops reading at 4.5 hours and counts what it skipped. Model output, not an official warning. Every step
 is also `python -m aquascope.archive.warnings run|publish --out build`; `--max-chunks N` is a smoke run that reads N
 chunks spread over the globe, is marked so, and is never published.
+
+### Flow against normal (`flowstatus/`)
+
+Every reach of Strahler order 5 and up (842,581 reaches), classed once a day by its forecast flow for the day against
+its own normal for the month (#559), the NOAA National Water Model map for the whole world. Two parts:
+
+- **The climatology, once** (`flow-climatology.yml`, run by hand): GEOGLOWS publishes flow duration curves for every
+  reach (`s3://geoglows-v2/retrospective/fdc.zarr`, `daily_monthly`), the percentiles of daily flow in each calendar
+  month. Checked against the daily records of four reaches (three months each), they are the percentiles of 1950 to 2019 (linear
+  interpolation) to within 1e-7. The job keeps the 10th, 25th, 75th and 90th of each month and writes only under
+  `flowstatus/climatology/`. Those reaches are spread over 23,085 of the store's 27,356 chunks (250 reaches each,
+  every month and probability together, 0.8 MB compressed), so the build streams about 18.5 GB. Measured on a
+  Europe box (31,128 reaches, 1,737 chunks, 1.39 GB): 8 minutes on a home line, 1.8 GB of memory at the peak (most
+  of it the GEOGLOWS model table), and 24 bytes a reach for each month file, so the whole climatology comes to about
+  250 MB.
+- **Today, daily**: the `flood-warnings` run already reads every order-5 chunk of the forecast, so
+  `warnings run --day0` keeps each reach's first-day flow (the ensemble mean of the forecast's first UTC day) as it
+  goes, and `python -m aquascope.flowstatus daily` classes it against the forecast month's percentiles. Nothing is
+  downloaded twice: the extra cost is one month file (about 20 MB) and a second or two of work. On the Europe box the
+  day's `latest.bin.gz` was 26 kB for 31,128 reaches (0.85 bytes a reach), so about 0.7 MB for the world. It writes only under `flowstatus/`, and it does not turn the day's Floods ahead issue red if it
+  fails.
+
+| path | what | licence |
+| --- | --- | --- |
+| `flowstatus/latest.bin.gz` | the classes for the Explorer: gzip of `AQFS`, a version byte, n (uint32 little endian), the sorted river ids as n LEB128 gaps, n class bytes (1 much below to 5 much above); reaches with no class left out | CC BY 4.0 |
+| `flowstatus/latest.parquet` | `river_id`, `flow_cms` (the first day's ensemble mean), `class` | CC BY 4.0 |
+| `flowstatus/<date>.bin.gz` | the day's classes, kept by the forecast's start date ([retention](#retention-of-the-daily-files): the last 60 days, then the first of each month) | CC BY 4.0 |
+| `flowstatus/manifest.json` | the issue date, the month, counts by class, the reaches with no flow or a dry channel, the method, what it is not, sizes, licences and the history | |
+| `flowstatus/climatology/month-01.parquet` to `month-12.parquet` | `river_id`, `p10`, `p25`, `p75`, `p90` (m3/s, daily flow in that calendar month, 1950 to 2019) | CC BY 4.0 |
+| `flowstatus/climatology/reaches.parquet` | `river_id`, `lat`, `lon`, `strahler_order` | CC BY 4.0 |
+
+The classes are the river status layer's: below the 10th percentile much below normal, 10th to 25th below, 25th to
+75th normal, 75th to 90th above, above the 90th much above; a flow equal to a bound counts towards normal. A reach whose
+90th percentile is zero (dry nine days in ten that month) is not classed. Modelled, not measured: the flow is the
+model's forecast and the normal the same model's simulated record. Locally:
+`python -m aquascope.flowstatus climatology --out build --max-chunks 40` (a smoke run, marked so, never published),
+`python -m aquascope.flowstatus daily --out build --climatology build --bbox W S E N` (reads the forecast itself), and
+`aquascope flowstatus [--bbox W S E N] [--river-id ID]` to read what is published.
+
+### Scout (`scout/`)
+
+After the day's Floods ahead issue, the same `flood-warnings` workflow runs the Explorer's Scout (#563) over the
+whole world and writes only under `scout/`. It reads the published layers (the newest month of the GEOGLOWS river
+status map, the Floods ahead issue, the newest complete month of Floods past, today's gauge snapshot and the
+evidence table) and keeps what stands out, by fixed rules ([explorer.md](explorer.md#scout)).
+
+| path | what |
+| --- | --- |
+| `scout/latest.json` | the findings (up to 25 per kind), each with `lat`, `lon`, `title`, `reason`, its headline `value` and `unit`, all its numbers under `facts`, its `source`; today's ten `picks`; the record checks (a named region's share much above or below normal against the same calendar month since 1990, flood cells against the same month since 2000); the inputs, the method and the sources |
+| `scout/<date>.json` | the same file, kept by the day it was made ([retention](#retention-of-the-daily-files): the last 60 days, then the first of each month) |
+
+Each finding carries the licence of the layer it came from (the river status map and the forecast CC BY 4.0, the
+return periods CC BY-NC-SA 4.0, Groundsource CC BY 4.0, the Sentinel-1 detections MIT). A day where no layer can be
+read writes nothing, so yesterday's file stays. Not a warning. Also `python -m aquascope.map_scout daily|publish
+--out build`.
+
+### Retention of the daily files
+
+The daily jobs keep a dated copy of each day's file next to `latest`. Kept forever, `flowstatus/` (about 0.7 MB a
+day) and `forecasts/warnings/` (about 0.8 MB a day, measured on the 2026-10-09 and 2026-10-10 issues) would each add
+a few hundred MB a year that nothing reads (#597). So the publish step of `flowstatus`, `forecasts/warnings` and
+`scout` applies one rule to its own folder (`aquascope.archive.retention`):
+
+- the `latest` files and the manifest are always kept;
+- every dated file of the last 60 days, counted back from the newest dated file (not from the clock, so a job that
+  stops for a while loses nothing);
+- before that, the first dated file of each calendar month.
+
+Older dated files are deleted in the same Hugging Face commit that uploads the day's files, and dropped from the
+manifest's `history` in that commit, so the manifest never lists a file that is gone; the manifest's `retention`
+field states the rule. Only names of the form `<folder>/<YYYY-MM-DD>.<ext>` that the folder's listing shows are
+deleted, never a `latest` file, a manifest or anything outside the folder; when the folder cannot be listed,
+nothing is deleted that day. If the commit that deletes fails, the day's files are uploaded
+without the deletions and the next publish prunes them. `publish --out build --dry-run` (on `aquascope.flowstatus`,
+`aquascope.archive.warnings` and `aquascope.map_scout`) prints what would be kept and pruned and uploads nothing.
+
+Two daily folders are left whole: `forecasts/issued/` is the archive of record, read to measure forecast skill
+against what the gauges later recorded, and `forecasts/status/<date>.parquet` is about 22 kB a day (under 10 MB a
+year at today's gauge count) and the only record of where each gauge's flow stood on the day, provisional data
+included.
 
 ## Monthly bulletins (`bulletins/`)
 
@@ -345,6 +426,29 @@ aquascope harvest stations --out archive --publish you/your-dataset   # needs HF
 The scheduled run lives in `.github/workflows/harvest.yml` (Mondays 03:17 UTC,
 or on demand from the Actions tab). It never fails because one agency is down;
 `health.json` and the job summary say which one did.
+
+## Job health
+
+Every scheduled workflow ends with a step that runs whether the job passed or
+not and writes a small record under `health/jobs/` (and nowhere else): the last
+run, the last success and the last failure, how long the run took, the rows or
+files it wrote (read from the job's own manifest), the date of its data, and the
+recent runs, from which the number of scheduled runs green in a row is counted.
+`health/jobs/index.json` lists every job with its expected cadence, from the one
+table in `aquascope/archive/health_jobs.py` (`JOBS`). A smoke run's record is
+never published.
+
+A failed scheduled run opens one issue per job labelled `job-health`, comments on
+it while the job keeps failing, and the next good run closes it. A scheduled run
+that did not publish counts as failed, so a harvest that ran but published
+nothing (#449) is red and filed, not quiet.
+
+The Explorer reads the index: a layer whose job is late says so in its legend
+row, and **Tools > Data status** lists every job. From a terminal:
+
+```bash
+python -m aquascope.archive.health_jobs status
+```
 
 ## Versioned snapshots and citation
 
