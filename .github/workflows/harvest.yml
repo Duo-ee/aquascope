@@ -137,6 +137,14 @@ jobs:
         continue-on-error: true
         run: aquascope harvest signatures --out archive
 
+      - name: Refresh the dataset card from the final observation manifest
+        # The card is cosmetic; a failure here must not skip the publish step below, which would
+        # throw away a week of mirrored observations (a run was lost that way on 2026-09-21).
+        continue-on-error: true
+        run: >-
+          python -c "import os; from aquascope.archive import refresh_dataset_card;
+          refresh_dataset_card('archive', os.environ['HF_DATASET'])"
+
       - name: Donor signatures and leave-one-out skill (basins/station_signatures.parquet, regionalization_skill.json)
         # Flow signatures of every gauged station with 10+ years of archived discharge and a catchment row, then
         # every donor predicted from the others (even stride sample) so the regionalisation reports its own skill.

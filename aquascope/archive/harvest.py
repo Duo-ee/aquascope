@@ -426,6 +426,26 @@ def _obs_section(out_dir: Path, repo_id: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _mirrored_station_count(out_dir: Path) -> int | None:
+    """Count distinct stations with at least one row in the observation manifest."""
+    manifest_path = out_dir / "obs" / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        from aquascope.archive.observations import _migrate_manifest
+
+        manifest = _migrate_manifest(json.loads(manifest_path.read_text(encoding="utf-8")))
+    except json.JSONDecodeError:
+        return None
+    mirrored = {
+        (entry.get("source", key.split("/", 1)[0]), station_id)
+        for key, entry in manifest.get("sources", {}).items()
+        for station_id, station in entry.get("stations", {}).items()
+        if station.get("n", 0) > 0
+    }
+    return len(mirrored)
+
+
 def write_dataset_card(path: Path, report: HarvestReport, repo_id: str = "Rekin226/aquascope-gauges") -> Path:
     """Write the Hugging Face dataset card (YAML front matter + per-source table)."""
     rows = []
@@ -455,12 +475,18 @@ def write_dataset_card(path: Path, report: HarvestReport, repo_id: str = "Rekin2
         "- 1K<n<10K\n"
         "---\n"
     )
+    mirrored = _mirrored_station_count(path.parent)
+    mirror_sentence = (
+        f" The observation mirror currently holds daily observations for **{mirrored:,} of them**."
+        if mirrored is not None
+        else ""
+    )
     body = f"""# AquaScope gauges
 
 The station catalog of every water-observation source [AquaScope](https://github.com/Rekin226/aquascope)
 can reach, harvested on a schedule and published as GeoParquet. Last run
-{report.run_at} with aquascope {report.aquascope_version}: **{report.n_stations:,} stations** from
-{report.n_ok} of {len(report.sources)} sources.
+{report.run_at} with aquascope {report.aquascope_version}: **{report.n_stations:,} catalogued stations** from
+{report.n_ok} of {len(report.sources)} sources.{mirror_sentence}
 
 Files:
 
@@ -526,3 +552,17 @@ source you use, as listed in the table above.
 """
     path.write_text(front + body, encoding="utf-8")
     return path
+
+
+def refresh_dataset_card(out_dir: str | Path, repo_id: str = "Rekin226/aquascope-gauges") -> Path:
+    """Regenerate the dataset card from the current catalog and observation reports."""
+    out = Path(out_dir)
+    health = json.loads((out / "health.json").read_text(encoding="utf-8"))
+    report = HarvestReport(
+        run_at=health["run_at"],
+        aquascope_version=health["aquascope_version"],
+        n_stations=health["n_stations"],
+        sources=[SourceHealth(**source) for source in health["sources"]],
+        files=health.get("files", {}),
+    )
+    return write_dataset_card(out / "README.md", report, repo_id=repo_id)
