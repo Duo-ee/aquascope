@@ -430,6 +430,20 @@ a gauge, `--rain`, `--warming`, `--demand`, `--rp`, `--llm` with your own key,
 seeded calibration gives −38.3% mean flow, −38.5% low flow and −46.0% 10-year flood
 for the Thur in both.
 
+## Paint this view
+
+The brush in the map tools paints one question at every gauge in view that the
+Archive mirrors (#657): the trend in annual floods, the trend in low flows or the
+baseflow index. The records are read from the Archive ten at a time and answered
+in the worker in batches, so the dots fill in while you watch; a dot with a dark
+ring is significant after the false discovery rate (Wilks, 2016), and the gauges
+with no record, too short a record or past the cap stay on the map, small and grey.
+The legend's Painted row holds the key, the field verdict and the downloads (a PNG
+figure, the table as CSV and a methods paragraph with its references); a click on
+a dot opens its card. "Where are floods getting bigger in Europe?" in Ask the map
+does the same, and undo takes it back. The questions, the methods and the check
+against the single-station trend are in [Paint the globe](paint.md).
+
 ## Map layers
 
 The rail is a layer stack, and every layer in it is keyless and free to use.
