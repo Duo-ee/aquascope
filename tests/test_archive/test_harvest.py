@@ -15,7 +15,7 @@ from aquascope.schemas.station import Station
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
 
-from aquascope.archive import harvest_stations, publish_folder, write_dataset_card  # noqa: E402
+from aquascope.archive import harvest_stations, publish_folder, refresh_dataset_card, write_dataset_card  # noqa: E402
 from aquascope.archive.harvest import HarvestReport, infer_site_ids, stations_to_table  # noqa: E402
 
 
@@ -169,6 +169,54 @@ def test_dataset_card_lists_every_source(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "hf://datasets/me/ds/stations.parquet" in text
     assert "aquascope harvest stations" in text
+
+
+def test_dataset_card_distinguishes_catalog_from_observation_mirror(tmp_path):
+    (tmp_path / "obs").mkdir()
+    manifest = {
+        "version": 2,
+        "sources": {
+            "usgs/discharge": {
+                "source": "usgs",
+                "variable": "discharge",
+                "stations": {"A": {"n": 10}, "empty": {"n": 0}},
+            },
+            "usgs/water_level": {
+                "source": "usgs",
+                "variable": "water_level",
+                "stations": {"A": {"n": 4}, "B": {"n": 2}},
+            },
+        },
+    }
+    (tmp_path / "obs" / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    report = HarvestReport(run_at="2026-10-19T00:00:00+00:00", aquascope_version="x", n_stations=3, sources=[])
+    text = write_dataset_card(tmp_path / "README.md", report).read_text(encoding="utf-8")
+    assert "**3 catalogued stations**" in text
+    assert "daily observations for **2 of them**" in text
+
+
+def test_refresh_dataset_card_uses_final_observation_manifest(tmp_path):
+    report = HarvestReport(run_at="2026-10-19T00:00:00+00:00", aquascope_version="x", n_stations=3, sources=[])
+    (tmp_path / "health.json").write_text(json.dumps(report.to_dict()), encoding="utf-8")
+    write_dataset_card(tmp_path / "README.md", report)
+    assert "observation mirror currently" not in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+    (tmp_path / "obs").mkdir()
+    manifest = {
+        "version": 2,
+        "sources": {
+            "usgs/discharge": {
+                "source": "usgs",
+                "variable": "discharge",
+                "stations": {"A": {"n": 10}, "empty": {"n": 0}},
+            }
+        },
+    }
+    (tmp_path / "obs" / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    refresh_dataset_card(tmp_path, repo_id="me/ds")
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "daily observations for **1 of them**" in text
+    assert "hf://datasets/me/ds/stations.parquet" in text
 
 
 def test_publish_folder_uses_hf_api(tmp_path, monkeypatch):
