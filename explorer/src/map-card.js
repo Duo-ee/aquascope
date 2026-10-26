@@ -410,6 +410,15 @@ function whatIfButton(t) {
   };
 }
 
+// Flood it (#658): a screening flood of this reach's 100-year flow on the visitor's GPU, drawn on the map.
+function floodItButton(t) {
+  return {
+    id: "floodit", label: "Flood it", hidden: !actions.openFloodIt || !t,
+    title: "Pour this reach's 100-year flow in for 6 hours and watch where the water goes (a screening flood)",
+    onClick: () => { if (t && actions.openFloodIt) actions.openFloodIt(t); },
+  };
+}
+
 const studyButton = () => ({
   id: "study", label: "Study", title: "A complete study at this place, planned with you, with a report",
   onClick: () => actions.openStudy({ fresh: true }),
@@ -610,8 +619,9 @@ function onSnap(m, snap) {
     details: () => openDetails("panel-point", "now"),
     // A reach taken from the offer above gets its Trace button back.
     buttons: [traceButton("pt", { ready: Boolean(m.reach) }),
-      ...(m.spec.buttons || []).filter((b) => b.id !== "trace" && b.id !== "reach" && b.id !== "whatif"),
-      whatIfButton({ kind: "reach", river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon })],
+      ...(m.spec.buttons || []).filter((b) => b.id !== "trace" && b.id !== "reach" && b.id !== "whatif" && b.id !== "floodit"),
+      whatIfButton({ kind: "reach", river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon }),
+      floodItButton({ river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon, order: snap.strahler_order })],
   });
   void loadForecast(m, snap);
 }

@@ -7,6 +7,9 @@ All notable changes to AquaScope are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Flood it, a spike: a live 2D screening flood from a river click, on the visitor's GPU** (#658, part of #664). Experimental. A reach's map card gains **Flood it**: its 2-, 10- or 100-year flow (GEOGLOWS's simulated record, Log-Pearson III) is poured into the reach for six hours on 512 x 512 cells of the Terrarium terrain (about 23 m at 52°N), with the GEOGLOWS river lines burnt in to the depth that carries the 2-year flow (Manning), and the depth spreads on the map with the time bar on the model's own clock. The solver is the local-inertial scheme of Bates, Horritt and Fewtrell (2010) in the q-centred form of de Almeida et al. (2012): WebGPU compute shaders (`explorer/src/floodsim-gpu.js`), the same scheme in a worker on a 256 x 256 grid without WebGPU, and `aquascope.floodsim` in numpy for the checks (still water, an exact volume budget, Manning's normal depth, Ritter's dam break within a stated tolerance) and the comparison with the JRC 100-year depth map. Labelled a screening flood everywhere. Every run is in the undo log. No CLI verb, MCP tool or Ask-the-map action yet. See [docs/floodsim.md](docs/floodsim.md).
+
 ### Fixed
 - **Cite 1.0.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.0.0's Zenodo DOI (10.5281/zenodo.23671741).
 

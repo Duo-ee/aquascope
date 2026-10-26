@@ -13,6 +13,8 @@ What is here and why (``docs/stability.md`` has the full policy):
   heads, SWMM). These modules changed in nearly every review of their first week.
 * The MODFLOW views added after 0.27.0 (#625, #626): ``aquascope.groundwater.layers`` (layers, cross-sections,
   a cell's heads over time) and ``aquascope.groundwater.budget`` (the cell-by-cell budget reader).
+* ``aquascope.floodsim`` (#658): the Flood it spike, a local-inertial screening flood; its interface will change
+  when the full feature lands.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -32,6 +34,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.flood_depth",
     "aquascope.flood_exposure",
     "aquascope.flood_section",
+    "aquascope.floodsim",
     "aquascope.flowstatus",
     "aquascope.groundwater.budget",
     "aquascope.groundwater.layers",
