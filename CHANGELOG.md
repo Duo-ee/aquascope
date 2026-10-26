@@ -7,6 +7,14 @@ All notable changes to AquaScope are documented here.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-27
+
+AquaScope 1.0. The globe is where the work happens: click a river, a gauge or your own model
+result and see it on the map, with studies, floods ahead and past, and an AI that acts on the
+map and can be undone. 1.0 is also a promise: [docs/stability.md](docs/stability.md) names the
+public Python, CLI, MCP and Archive surface, and from here a breaking change waits for 2.0 with
+a deprecation of at least six months. Everything marked experimental there can still move.
+
 ### Added
 - **The Archive can be deposited on Zenodo, for a dataset DOI of its own** (part of #444 and the 1.0 milestone). `aquascope.archive.zenodo` (internal) builds a deposit bundle from the dataset at one Hugging Face commit: the catalogue, `signatures.parquet`, `health.json`, the dataset card, the `obs/` JSON files and one `.tar` per variable and source (only redistributable sources; any other is refused; catalogue and signature rows of sources whose licence is unknown are left out until their terms are verified, and named), with `SOURCES.md` (every source's licence and attribution) and `MANIFEST.json` (sizes, SHA-256, snapshot date). The metadata is a dataset with the catalogued and mirrored counts as two numbers, the record licence Other (Attribution) with each source's own licence listed, and a supplement to the software DOI; derived folders stay on Hugging Face. `deposit` makes a new record or a new version of a concept record through Zenodo's bucket API and leaves a draft unless asked to publish. [`archive-zenodo.yml`](.github/workflows/archive-zenodo.yml) runs it by hand (sandbox first, a draft by default, secrets `ZENODO_SANDBOX_TOKEN` and `ZENODO_TOKEN`) and writes nothing to Hugging Face. No DOI exists yet; [Citing the Archive](docs/archive.md#citing-the-archive) says how the maintainer makes the first deposit.
 - **MODFLOW results that look like a modeller's tools: layers in 3D, cross-sections, hydrographs and the water budget** (#625, #626, part of #627). Experimental, in `aquascope.groundwater.layers` and `aquascope.groundwater.budget`; the plan view and the stable surface are unchanged.
