@@ -346,6 +346,18 @@
         "code",
         "test"
       ]
+    },
+    {
+      "login": "Duo-ee",
+      "name": "Duo",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113885053?v=4",
+      "profile": "https://github.com/Duo-ee",
+      "contributions": [
+        "doc",
+        "code",
+        "test",
+        "review"
+      ]
     }
   ],
   "commitType": "docs"
