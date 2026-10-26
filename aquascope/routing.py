@@ -3,12 +3,12 @@
 GEOGLOWS v2 publishes the routing configuration of its global model per processing unit (VPU) on S3, readable
 from any page (``Access-Control-Allow-Origin: *``): ``rapid_connect.csv`` (each reach and the reach it drains
 to, -1 at an outlet), ``k.csv`` (each reach's Muskingum travel time, in seconds) and ``x.csv`` (its weight, 0.36
-everywhere in the units checked), in the same row order, which is topological: every reach comes after every
+in the four units checked), in the same row order, which is topological: every reach comes after every
 reach that drains to it. This module routes water over that network with the same equation the model uses:
 
 * :func:`plan` gives each reach a number of sub-reaches and of sub-steps so that every Muskingum coefficient
-  is non-negative (``2kx <= dt <= 2k(1 - x)`` for each sub-reach and sub-step), as river-route, the router
-  GEOGLOWS v2 runs, does: a reach too short for the step takes sub-steps of its own with its inflow interpolated
+  is non-negative (``2kx <= dt <= 2k(1 - x)`` for each sub-reach and sub-step), as river-route, the GEOGLOWS
+  team's router, does: a reach too short for the step takes sub-steps of its own with its inflow interpolated
   linearly across them; a reach too long for it is split into sub-reaches in series.
 * :func:`route_network` routes any set of reaches, upstream to downstream, each reach's whole series at once
   (the recurrence ``Q[t+1] = C3 Q[t] + b[t]`` is a first-order linear filter).
@@ -20,7 +20,7 @@ reach that drains to it. This module routes water over that network with the sam
 * :func:`retro_check` is the check against GEOGLOWS's own retrospective simulation: it routes the hourly
   retrospective flow of an upstream reach, the tributaries that join on the way and the runoff of the path's own
   catchments to a reach downstream, and compares the result with the retrospective there (:data:`CHECK` has
-  the numbers, docs/explorer/route.md how they were made).
+  the numbers, docs/explorer.md how they were made).
 
 Muskingum is linear, so the wave added at a reach routes on its own: what :func:`route` returns is the flow
 that water adds to whatever the river already carries, not the river's total flow.
@@ -67,12 +67,37 @@ METHOD = {
              "sub-steps that keep every coefficient non-negative (2kx <= dt <= 2k(1 - x)), as river-route does; "
              "the hourly step is GEOGLOWS's own."),
     "citation": ("McCarthy (1938), the Muskingum method; Cunge (1969), J. Hydraul. Res. 7(2), 205-230; David et al. "
-                 "(2011), J. Hydrometeorol. 12, 1145-1165 (RAPID); Hales, river-route (GEOGLOWS v2's router)."),
+                 "(2011), J. Hydrometeorol. 12(5), 913-934, doi:10.1175/2011JHM1345.1 (RAPID); river-route, the "
+                 "GEOGLOWS team's router (github.com/geoglows/river-route)."),
 }
 
-#: The check against GEOGLOWS's own hourly retrospective (docs/explorer/route.md). Filled from
-#: :func:`retro_check` runs on 2026-10-27; every number below was computed by that function.
-CHECK: dict[str, Any] = {}
+#: The check against GEOGLOWS's own hourly retrospective (docs/explorer.md, Route a flood): :func:`retro_check`
+#: run on 2026-10-27 with ``lateral="specific"`` and the defaults; every number below is that function's output.
+CHECK: dict[str, Any] = {
+    "date": "2026-10-27",
+    "reference": "GEOGLOWS v2 hourly retrospective simulation (retrospective/hourly.zarr), CC BY 4.0",
+    "how": ("The retrospective flow leaving the upstream reach and every tributary draining at least 1 % of the "
+            "area at the downstream reach, routed with this module; smaller tributaries and the path's own unit "
+            "catchments get their area times the specific runoff of the flows read. Hourly, 10 days of spin-up "
+            "not scored. 'No routing' adds the same inflows with no travel time."),
+    "tolerance": "NSE at least 0.85, peak within 10 %, peak timing within 12 h",
+    "cases": [
+        {"reach": "Elbe, Dresden to Magdeburg (June 2013)", "upstream": 230494421, "downstream": 230538985,
+         "window": ["2013-05-25", "2013-07-04"], "n_path": 89, "k_path_h": 106.7,
+         "nse": 0.9818, "peak_error_pct": 2.78, "peak_timing_h": 0.0, "bias_pct": 2.48, "nse_no_routing": 0.4255},
+        {"reach": "Rhine, Basel to Cologne (winter 2017-18)", "upstream": 230301988, "downstream": 230515098,
+         "window": ["2017-12-20", "2018-02-09"], "n_path": 166, "k_path_h": 203.4,
+         "nse": 0.9858, "peak_error_pct": 2.36, "peak_timing_h": -4.0, "bias_pct": 2.46, "nse_no_routing": 0.726},
+        {"reach": "Danube, Passau to Vienna (June 2013)", "upstream": 220751824, "downstream": 220722952,
+         "window": ["2013-05-25", "2013-07-04"], "n_path": 102, "k_path_h": 124.5,
+         "nse": 0.9658, "peak_error_pct": 5.91, "peak_timing_h": -5.0, "bias_pct": 5.74, "nse_no_routing": -0.3143},
+        {"reach": "Mississippi, St. Louis to Memphis (spring 2019)", "upstream": 760684821, "downstream": 760595232,
+         "window": ["2019-04-15", "2019-07-14"], "n_path": 153, "k_path_h": 239.4,
+         "nse": 0.8935, "peak_error_pct": -0.91, "peak_timing_h": 4.0, "bias_pct": -3.76, "nse_no_routing": -0.183},
+    ],
+    "summary": ("Checked against GEOGLOWS's own hourly retrospective on four rivers: NSE 0.89 to 0.99, the peak "
+                "within 6 % and its timing within 5 h (no routing: NSE -0.31 to 0.73)."),
+}
 
 ATTRIBUTION = ("GEOGLOWS v2 routing configuration and retrospective simulation, CC BY 4.0. River network: TDX-Hydro "
                "(NGA), CC BY-SA 4.0, shown and not republished.")
@@ -513,7 +538,7 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
         "reaches": rows,
         "furthest": {"river_id": ids[last], "index": last, **{kk: rows[last][kk] for kk in
                                                              ("peak_cms", "peak_h", "front_h", "attenuation_pct")}},
-        "method": METHOD, "check": CHECK or None,
+        "method": METHOD, "check": {"summary": CHECK["summary"], "tolerance": CHECK["tolerance"]},
         "notes": [NOTE_LINEAR, NOTE_MODEL], "attribution": ATTRIBUTION, "licence": LICENCE, "modelled": True,
     }
     if truncated:
@@ -679,7 +704,7 @@ def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float
         "hours": n_steps, "dt_s": DT_S, "n_reaches": len(order),
         "biggest": rows[best], "outlets": [rows[j] for j in outlets],
         "reaches": sorted(rows, key=lambda r: -r["peak_cms"])[:500],
-        "method": METHOD, "check": CHECK or None,
+        "method": METHOD, "check": {"summary": CHECK["summary"], "tolerance": CHECK["tolerance"]},
         "notes": [NOTE_MODEL, "Only the storm's runoff is routed: these are the flows it adds."],
         "attribution": ATTRIBUTION, "licence": LICENCE, "modelled": True,
     }

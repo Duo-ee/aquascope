@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  RAMP, busiestFrame, cardPlaces, flatterWords, flowWords, frameLabel, frameStates, headline, hoursWords, logLabel,
+  RAMP, busiestFrame, cardPlaces, flatterWords, flowWords, frameFeatureStates, frameLabel, frameStates, headline, hoursWords, logLabel,
   pathBounds, pathFilterExpr, peakShares, placeFeatures, reachedBounds, routeArgs, townsFrom, waveColorExpr,
   waveWidthExpr,
 } from "../src/route-core.js";
@@ -57,6 +57,7 @@ test("frames: each reach's share at a step, the peak everywhere, the busiest ste
   assert.deepEqual(peakShares(RESULT.frames), [90, 75, 30]);
   assert.deepEqual(frameStates(RESULT.frames, 0, { peak: true }), [[1, 90], [2, 75], [3, 30]]);
   assert.equal(busiestFrame(RESULT.frames), 3);
+  assert.deepEqual(frameFeatureStates(RESULT.frames, 2)[1], [2, { rw: 60, rp: 75 }]);
 });
 
 test("the places: labels on the map and the card's list", () => {
@@ -65,7 +66,14 @@ test("the places: labels on the map and the card's list", () => {
   assert.equal(fc.features[1].properties.text, "Strasbourg · peak 2 d 12 h · 1,440 m³/s");
   assert.equal(fc.features[2].properties.text, "Far · too small to matter");
   assert.deepEqual(cardPlaces(RESULT.places).map((p) => p.name), ["Rheinweiler", "Strasbourg"]);
-  assert.deepEqual(cardPlaces(RESULT.places, 1).map((p) => p.name), ["Strasbourg"]);
+  // Spread along the stretch, a city before a town before a gauge where they stand close together.
+  const many = [0, 1, 2, 50, 51, 100, 150, 200, 201, 300].map((km, i) => ({ kind: i === 1 ? "city" : i % 2 ? "town" : "gauge",
+    name: `P${i}`, along_km: km, peak_h: km, peak_cms: 1, reached: true, lat: 0, lon: 0 }));
+  const picked = cardPlaces(many, 4).map((p) => p.name);
+  assert.equal(picked.length, 4);
+  assert.equal(picked[0], "P1");
+  const fc2 = placeFeatures(many, cardPlaces(many, 4));
+  assert.equal(fc2.features.filter((f) => f.properties.text).length, 4);
 });
 
 test("the headline and the log line come from the package's numbers", () => {
@@ -95,5 +103,6 @@ test("towns come from the basemap's place labels, cities and towns only, once ea
   const got = townsFrom([f("Köln", "city", 6.96, 50.94), f("Köln", "city", 6.96, 50.94), f("Hamlet", "hamlet", 7, 50),
     { properties: { name: "Bonn", class: "town", "name:latin": "Bonn" }, geometry: { type: "Point", coordinates: [7.1, 50.73] } }]);
   assert.deepEqual(got.map((t) => t.name), ["Köln", "Bonn"]);
-  assert.equal(got[0].kind, "town");
+  assert.equal(got[0].kind, "city");
+  assert.equal(got[1].kind, "town");
 });

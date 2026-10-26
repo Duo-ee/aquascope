@@ -234,3 +234,36 @@ def test_mcp_route_flood(toy):
 
     res = route_flood(TOY_IDS["A"], peak_cms=600.0, places=False)
     assert res["ok"] and "frames" not in res and "geometry" not in res
+
+
+def test_the_check_against_the_retrospective_meets_its_stated_tolerance():
+    cases = routing.CHECK["cases"]
+    assert len(cases) >= 3
+    for c in cases:
+        assert c["nse"] >= 0.85 and abs(c["peak_error_pct"]) <= 10 and abs(c["peak_timing_h"]) <= 12, c["reach"]
+        assert c["nse"] > c["nse_no_routing"], c["reach"]
+
+
+def test_the_retro_check_routes_what_it_reads(toy):
+    # A fake retrospective: the upstream reach H1 sends a pulse, H2 a steady flow; the downstream reach C is what
+    # this module itself routes from them, so the check scores it perfectly.
+    n = 400
+    t = np.arange(n)
+    q_h1 = 50 + 400 * np.exp(-0.5 * ((t - 200) / 12.0) ** 2)
+    q_h2 = np.full(n, 20.0)
+
+    class Fake:
+        def times(self):
+            return np.datetime64("2020-01-01T00:00") + np.arange(n).astype("timedelta64[h]")
+
+        def columns(self, rids, t0, t1):
+            k, x, ds = routing._params(None)
+            out = routing.route_network([0, 1, 2, 3, 4], ds, k, x, n - 1,
+                                        outflow={0: q_h1, 1: q_h2}, q0={2: 50.0, 3: 70.0, 4: 70.0})
+            series = {TOY_IDS["H1"]: q_h1, TOY_IDS["H2"]: q_h2, TOY_IDS["C"]: out[4]}
+            return {r: series[r][t0:t1] for r in rids}
+
+    res = routing.retro_check(TOY_IDS["H1"], TOY_IDS["C"], "2020-01-06", "2020-01-17", spin_up_h=0, retro=Fake(),
+                              lateral="none", min_share=0.0)
+    assert res["n_path"] == 3 and res["n_tributaries_read"] == 1
+    assert res["routed"]["nse"] > 0.999 and abs(res["routed"]["peak_timing_h"]) <= 1

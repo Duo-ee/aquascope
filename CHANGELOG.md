@@ -7,6 +7,9 @@ All notable changes to AquaScope are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Route a flood: a flood wave down GEOGLOWS's own river network, on the globe** (#656, part of #664). `aquascope.routing` (experimental) routes water with Muskingum reach by reach over GEOGLOWS v2's own topology, k (seconds) and x, read from its public routing configuration, at GEOGLOWS's hourly step; each reach takes the sub-reaches and sub-steps that keep every coefficient non-negative, as river-route does. `route` sends a flood (a triangle) or a release (a block) of a set peak, or the reach's T-year flow, down the path to the sea and returns per reach the added peak, the hour of the peak, the wave's front and the attenuation, with the gauges and towns on the way; `route_storm` turns a storm drawn as a polygon into runoff with a plain runoff coefficient and routes it down every river below. Checked against GEOGLOWS's own hourly retrospective on the Elbe, Rhine, Danube and Mississippi: NSE 0.89 to 0.99, the peak within 6 % and its timing within 5 h (no routing: NSE -0.31 to 0.73); `aquascope route check` repeats it. In the Explorer, **Route a flood** on a river's map card plays the wave on the river lines with the time bar, with the peak and its hour on the towns and gauges downstream, a card for each and the run in the action log; Ask the map reads "route a flood of 500 m3/s from Basel" and "release 800 m3/s for 2 days from here" into the new `route` action without a model. `aquascope route flood|storm|check` and the MCP tools `route_flood` and `route_storm` are the same engine. See [docs/explorer.md](docs/explorer.md#route-a-flood).
+
 ### Fixed
 - **Cite 1.0.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.0.0's Zenodo DOI (10.5281/zenodo.23671741).
 

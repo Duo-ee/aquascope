@@ -6,33 +6,34 @@
 // The wave's colour by its share of the peak that entered: pale where little arrives, deep where it is near
 // full strength (a sequential blue-purple ramp that reads on the light and dark basemaps alike).
 export const RAMP = [
-  [0, "#c6dbef"],
-  [10, "#9ecae1"],
-  [25, "#6baed6"],
-  [45, "#4292c6"],
-  [65, "#6a51a3"],
-  [85, "#54278f"],
+  [0, "#b9c4cc"],
+  [1, "#9ecae1"],
+  [10, "#4292c6"],
+  [30, "#2171b5"],
+  [50, "#6a51a3"],
+  [75, "#54278f"],
   [100, "#3f007d"],
 ];
 
 const finite = (v) => v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
 
-/** The line colour expression: the reach's feature-state "rw" (its share, 0 to 100) on RAMP. */
-export function waveColorExpr() {
+/** The line colour expression: the reach's feature-state `key` (a share, 0 to 100) on RAMP: "rw" the wave now,
+ * "rp" each reach's own peak (the faint trail under the wave). */
+export function waveColorExpr(key = "rw") {
   const stops = RAMP.flatMap(([v, c]) => [v, c]);
-  return ["interpolate", ["linear"], ["coalesce", ["feature-state", "rw"], 0], ...stops];
+  return ["interpolate", ["linear"], ["coalesce", ["feature-state", key], 0], ...stops];
 }
 
 /** The line width: wider as more of the wave is there, and wider as you zoom in. */
 export function waveWidthExpr() {
   const share = ["coalesce", ["feature-state", "rw"], 0];
-  const at = (k) => ["interpolate", ["linear"], share, 0, 0.8 * k, 20, 2.4 * k, 100, 7 * k];
-  return ["interpolate", ["linear"], ["zoom"], 3, at(0.6), 7, at(1), 12, at(1.6)];
+  const at = (k) => ["interpolate", ["linear"], share, 0, 1.2 * k, 10, 3.5 * k, 50, 8 * k, 100, 12 * k];
+  return ["interpolate", ["linear"], ["zoom"], 3, at(0.7), 7, at(1), 12, at(1.4)];
 }
 
-/** Reaches with no water yet are drawn faintly, so the path is there before the wave is. */
+/** The wave is drawn where there is water now; the trail under it shows the rest. */
 export function waveOpacityExpr() {
-  return ["case", [">", ["coalesce", ["feature-state", "rw"], 0], 0], 0.95, 0.35];
+  return ["case", [">", ["coalesce", ["feature-state", "rw"], 0], 0], 0.95, 0];
 }
 
 /** The filter that keeps the path's reaches: a match on riverId, so the tiles' own lines are coloured. */
@@ -99,28 +100,46 @@ export function frameStates(frames, i, { peak = false } = {}) {
   return ids.map((id, j) => [id, row[j] || 0]);
 }
 
-/** The places' labels on the map: one line each, "Cologne · peak 3 d 6 h · 1,240 m³/s". */
-export function placeFeatures(places) {
+/** The states the map sets for a frame: { rw: the wave now, rp: the reach's own peak } per river_id. */
+export function frameFeatureStates(frames, i, { peak = false } = {}) {
+  const top = peakShares(frames);
+  return frameStates(frames, i, { peak }).map(([id, rw], j) => [id, { rw, rp: top[j] }]);
+}
+
+/** The places on the map: a dot for each, and for the ones the card lists (`labelled`, from cardPlaces) one line,
+ * "Cologne · peak 3 d 6 h · 1,240 m³/s". */
+export function placeFeatures(places, labelled = null) {
+  const show = new Set(labelled || places || []);
   const feats = [];
   for (const [n, p] of (places || []).entries()) {
     if (!finite(p.lat) || !finite(p.lon)) continue;
     const reached = p.reached && finite(p.peak_h);
-    const text = reached ? `${p.name} · peak ${hoursWords(p.peak_h)} · ${flowWords(p.peak_cms)} m³/s`
+    const text = !show.has(p) ? "" : reached ? `${p.name} · peak ${hoursWords(p.peak_h)} · ${flowWords(p.peak_cms)} m³/s`
       : `${p.name} · ${p.reached ? "still rising" : "too small to matter"}`;
     feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [Number(p.lon), Number(p.lat)] },
-      properties: { n, kind: p.kind === "gauge" ? "gauge" : "town", text, rank: p.kind === "town" ? 0 : 1 } });
+      properties: { n, kind: p.kind === "gauge" ? "gauge" : "town", text, labelled: Boolean(text),
+        rank: 4 - (PREFER[p.kind] || 2) } });
   }
   return { type: "FeatureCollection", features: feats };
 }
 
-/** The places the card lists: the towns first (people), then the gauges, each in the order the water reaches them,
- * at most `max`. */
+const PREFER = { city: 3, town: 2, gauge: 1 };
+
+/** The places the card lists and the map labels: at most `max`, spread along the stretch the wave reached, a city
+ * before a town before a gauge where they stand close together, in the order the water reaches them. */
 export function cardPlaces(places, max = 8) {
-  const all = (places || []).filter((p) => p.reached && finite(p.peak_h));
-  const towns = all.filter((p) => p.kind !== "gauge");
-  const gauges = all.filter((p) => p.kind === "gauge");
-  const pick = [...towns.slice(0, max), ...gauges.slice(0, Math.max(0, max - towns.length))].slice(0, max);
-  return pick.sort((a, b) => (a.along_km || 0) - (b.along_km || 0));
+  const all = (places || []).filter((p) => p.reached && finite(p.peak_h))
+    .sort((a, b) => (a.along_km || 0) - (b.along_km || 0));
+  if (all.length <= max) return all;
+  const span = (all.at(-1).along_km || 0) - (all[0].along_km || 0);
+  const gap = span / max;
+  const out = [];
+  for (const p of all) {
+    const last = out.at(-1);
+    if (!last || (p.along_km || 0) - (last.along_km || 0) >= gap) out.push(p);
+    else if ((PREFER[p.kind] || 2) > (PREFER[last.kind] || 2)) out[out.length - 1] = p;
+  }
+  return out.slice(0, max);
 }
 
 /** The result's first line: what entered and how far its peak got. */
@@ -194,13 +213,13 @@ export function townsFrom(features) {
   const out = [];
   for (const f of features || []) {
     const p = f.properties || {};
-    if (!["city", "town"].includes(p.class)) continue;
+    if (!["city", "town"].includes(p.class)) continue;   // villages would crowd the river
     const name = p["name:latin"] || p.name_en || p.name;
     const g = f.geometry;
     if (!name || !g || g.type !== "Point") continue;
     if (seen.has(name)) continue;
     seen.add(name);
-    out.push({ name: String(name), lat: g.coordinates[1], lon: g.coordinates[0], kind: "town" });
+    out.push({ name: String(name), lat: g.coordinates[1], lon: g.coordinates[0], kind: p.class });
   }
   return out;
 }

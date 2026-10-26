@@ -19,13 +19,14 @@ import { clearRiverNetwork, clearRiverTrace } from "./river-map.js?v=__BUILD__";
 import { releaseModelClock, setModelStep, useModelClock } from "./time-ui.js?v=__BUILD__";
 import { call } from "./worker-client.js?v=__BUILD__";
 import {
-  RAMP, busiestFrame, cardPlaces, flatterWords, flowWords, frameLabel, frameStates, headline, hoursWords, logLabel,
+  RAMP, busiestFrame, cardPlaces, flatterWords, flowWords, frameFeatureStates, frameLabel, headline, hoursWords, logLabel,
   pathFilterExpr, placeFeatures, reachedBounds, routeArgs, townsFrom, waveColorExpr, waveOpacityExpr, waveWidthExpr,
 } from "./route-core.js?v=__BUILD__";
 
 const SRC = "river-rt-net";
 const PTS = "river-rt-pts";
-const L = { casing: "river-rt-casing", wave: "river-rt-wave", dot: "river-rt-dot", label: "river-rt-label" };
+const L = { casing: "river-rt-casing", trail: "river-rt-trail", wave: "river-rt-wave", dot: "river-rt-dot",
+  label: "river-rt-label" };
 const NET = { source: SRC, sourceLayer: "streams" };
 const EMPTY = { type: "FeatureCollection", features: [] };
 const CREDIT = "Muskingum routing (aquascope) with GEOGLOWS v2's own k, x and network, CC BY 4.0; rivers TDX-Hydro, " +
@@ -63,13 +64,18 @@ function ensureLayers() {
     const none = ["boolean", false];
     const layout = { "line-cap": "round", "line-join": "round" };
     map.addLayer({ id: L.casing, type: "line", source: SRC, "source-layer": "streams", filter: none, layout,
-      paint: { "line-color": "rgba(15, 28, 38, 0.5)",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 3, 7, 5, 12, 8] } }, before);
+      paint: { "line-color": "rgba(255, 255, 255, 0.85)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 3, 7, 4.5, 12, 7] } }, before);
+    // The trail: every reach in its own peak's colour, faint, so the way the wave flattens is always there.
+    map.addLayer({ id: L.trail, type: "line", source: SRC, "source-layer": "streams", filter: none, layout,
+      paint: { "line-color": waveColorExpr("rp"), "line-opacity": 0.45,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1.6, 7, 2.6, 12, 4] } }, before);
     map.addLayer({ id: L.wave, type: "line", source: SRC, "source-layer": "streams", filter: none, layout,
       paint: { "line-color": waveColorExpr(), "line-width": waveWidthExpr(), "line-opacity": waveOpacityExpr() } }, before);
     const town = ["==", ["get", "kind"], "town"];
     map.addLayer({ id: L.dot, type: "circle", source: PTS,
-      paint: { "circle-radius": ["case", town, 5, 4], "circle-color": ["case", town, "#ffffff", "#3f007d"],
+      paint: { "circle-radius": ["case", ["get", "labelled"], ["case", town, 5.5, 4.5], 2.6],
+        "circle-color": ["case", town, "#ffffff", "#3f007d"],
         "circle-stroke-width": 2, "circle-stroke-color": ["case", town, "#3f007d", "#ffffff"] } });
     map.addLayer({ id: L.label, type: "symbol", source: PTS,
       layout: { "text-field": ["get", "text"], "text-font": ["Noto Sans Bold"], "text-size": 12,
@@ -98,15 +104,18 @@ function hook() {
 
 function setStates(pairs) {
   const keep = new Set(pairs.map(([id]) => id));
-  for (const id of litIds) if (!keep.has(id)) { try { map.removeFeatureState({ ...NET, id }, "rw"); } catch { /* swapping */ } }
-  for (const [id, rw] of pairs) { try { map.setFeatureState({ ...NET, id }, { rw }); } catch { /* swapping */ } }
+  for (const id of litIds) {
+    if (keep.has(id)) continue;
+    try { map.removeFeatureState({ ...NET, id }, "rw"); map.removeFeatureState({ ...NET, id }, "rp"); } catch { /* swapping */ }
+  }
+  for (const [id, st] of pairs) { try { map.setFeatureState({ ...NET, id }, st); } catch { /* swapping */ } }
   litIds = [...keep];
 }
 
 function drawFrame(i, { peak = false } = {}) {
   if (!shown || !ensureLayers()) return;
   shown.frame = peak ? null : i;
-  setStates(frameStates(shown.result.frames, i, { peak }));
+  setStates(frameFeatureStates(shown.result.frames, i, { peak }));
   refreshLegend("route");
 }
 
@@ -114,14 +123,14 @@ function draw() {
   if (!shown || !ensureLayers()) return;
   const { result } = shown;
   const ids = (result.frames && result.frames.ids) || [];
-  for (const id of [L.casing, L.wave]) map.setFilter(id, pathFilterExpr(ids));
-  map.getSource(PTS).setData(placeFeatures(result.places));
+  for (const id of [L.casing, L.trail, L.wave]) map.setFilter(id, pathFilterExpr(ids));
+  map.getSource(PTS).setData(placeFeatures(result.places, cardPlaces(result.places, narrow() ? 3 : 8)));
   drawFrame(shown.frame === null || shown.frame === undefined ? 0 : shown.frame, { peak: shown.frame === null });
 }
 
 function clearLayers() {
   if (!state.mapOk || !map || !map.getLayer(L.wave)) return;
-  for (const id of [L.casing, L.wave]) map.setFilter(id, ["boolean", false]);
+  for (const id of [L.casing, L.trail, L.wave]) map.setFilter(id, ["boolean", false]);
   setStates([]);
   if (map.getSource(PTS)) map.getSource(PTS).setData(EMPTY);
 }
@@ -163,8 +172,8 @@ function paint(value, { frame = true, play = false } = {}) {
   if (frame) { clearRiverNetwork(); clearRiverTrace(); }
   draw();
   takeClock(0);
-  if (frame) frameResult(value.result);
   renderResult();
+  if (frame) frameResult(value.result);
   openLegendRow("route", true);
   if (play) playOnce();
 }
@@ -175,7 +184,12 @@ function frameResult(result) {
   const box = reachedBounds(result);
   if (!box || !state.mapOk || !map) return;
   const p = panel();
-  const pad = { top: 70, left: 40, right: 40, bottom: 90 };
+  const pad = { top: 110, left: 40, right: 40, bottom: 170 };
+  const lg = $("map-legend");
+  if (lg && !lg.hidden && !narrow()) {
+    const r = lg.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
+    if (r.width && r.right < c.left + c.width / 2) pad.left = Math.max(pad.left, r.right - c.left + 24);
+  }
   if (p && !p.hidden) {
     if (narrow()) pad.bottom = Math.min(p.offsetHeight + 24, map.getContainer().clientHeight * 0.55);
     else pad.right = p.offsetWidth + 40;
@@ -245,9 +259,9 @@ function renderResult() {
   if (!mine) return;
   const r = shown.result;
   $("rt-head").textContent = headline(r);
-  const rows = cardPlaces(r.places, narrow() ? 5 : 8);
+  const rows = cardPlaces(r.places, narrow() ? 3 : 8);
   $("rt-places").innerHTML = rows.length
-    ? '<li class="rt-hdr"><i></i><span class="rt-name">On the way</span><span class="rt-when">peak after</span>' +
+    ? '<li class="rt-hdr"><i></i><span class="rt-name">Where</span><span class="rt-when">peak after</span>' +
       '<span class="rt-q">m³/s</span><span class="rt-flat">flatter</span></li>' + rows.map(placeRow).join("")
     : '<li class="rt-none">No town or gauge on the stretch the wave reached in view.</li>';
   const check = r.check && r.check.summary ? ` ${r.check.summary}` : "";
@@ -317,7 +331,7 @@ async function addTowns(value) {
     const res = await call("route", { op: "places", args: { result: slim, places: towns } });
     if (!shown || shown.result !== value.result || !res || !res.places || !res.places.length) return;
     value.result.places = [...value.result.places, ...res.places].sort((a, b) => (a.along_km || 0) - (b.along_km || 0));
-    map.getSource(PTS).setData(placeFeatures(value.result.places));
+    map.getSource(PTS).setData(placeFeatures(value.result.places, cardPlaces(value.result.places, narrow() ? 3 : 8)));
     renderResult();
   } catch { /* the gauges stand without the towns */ }
 }
@@ -424,7 +438,8 @@ export function initRoute() {
   actions.routeFlood = routeFlood;
   actions.selectedReach = selectedReach;
   globalThis.__aq = globalThis.__aq || {};
-  globalThis.__aq.route = { open: openRoute, run, shown: () => shown, frame: drawFrame };
+  globalThis.__aq.route = { open: openRoute, run, shown: () => shown, frame: drawFrame, step: (i) => setModelStep(i),
+    peak: () => releaseModelClock({ exit: true }) };
   syncOutputs();
 }
 

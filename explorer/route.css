@@ -1,6 +1,7 @@
 /* Route it (#656): the panel's own parts (it shares the What if panel's frame, whatif.css), the list of towns
    and gauges with the wave's peak, and the legend's ramp. The wave itself is painted by src/route-map.js. */
 
+.route { width: 340px; }
 .rt-kind { border: 0; margin: 0; padding: 0; display: grid; gap: .3rem; }
 .rt-kind label { display: flex; align-items: center; gap: .35rem; font-size: .76rem; color: var(--ink-2); }
 .rt-kind select, .rt-kind input[type="number"] {
@@ -11,7 +12,7 @@
 .rt-head { margin: 0 0 .4rem; font-size: .78rem; line-height: 1.4; color: var(--ink); }
 .rt-places { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .rt-places li {
-  display: grid; grid-template-columns: 12px 1fr 4.6rem 4.2rem 3.2rem; align-items: center; gap: .35rem;
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) 4.4rem 3.6rem 2.8rem; align-items: center; gap: .3rem;
   font-size: .74rem; padding: 2px 0; font-variant-numeric: tabular-nums;
 }
 .rt-places .rt-hdr { color: var(--muted); font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; }
@@ -28,5 +29,9 @@
 
 @media (max-width: 640px) {
   .route.done .rt-form, .route.done .wi-sub { display: none; }
-  .rt-places li { grid-template-columns: 12px 1fr 4rem 3.8rem 2.8rem; }
+  /* after a run the sheet moves to the top and keeps to the answer, so the wave and the time bar below show */
+  .route.done { top: 64px; bottom: auto; max-height: 38vh; }
+  .route.done .wi-model, .route.done .wi-status, .route.done .wi-kicker { display: none; }
+  .route { width: auto; }
+  .rt-places li { grid-template-columns: 10px minmax(0, 1fr) 4rem 3.4rem 2.6rem; }
 }
