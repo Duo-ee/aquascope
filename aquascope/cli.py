@@ -2353,6 +2353,59 @@ def cmd_area_study(args: argparse.Namespace) -> None:
         print(f"- {note}")
 
 
+# ── paint (Paint the globe, #657) ────────────────────────────────────────────
+
+
+def cmd_paint(args: argparse.Namespace) -> None:
+    """`aquascope paint`: one question at every Archive gauge in a box, with field significance (thin face)."""
+    from aquascope import paint
+
+    if not args.bbox:
+        logger.error("give --bbox=west,south,east,north")
+        sys.exit(2)
+    params: dict[str, Any] = {"min_years": args.min_years, "alpha_global": args.alpha,
+                              "correlated": not args.independent}
+    for k in ("start_year", "end_year", "year_start_month"):
+        if getattr(args, k) is not None:
+            params[k] = getattr(args, k)
+    done = [0]
+
+    def tick(row: dict[str, Any]) -> None:
+        done[0] += 1
+        if not args.json and done[0] % 25 == 0:
+            print(f"  {done[0]} gauges answered...", file=sys.stderr)
+
+    res = paint.paint(args.question, bbox=list(_parse_bbox(args.bbox) or ()), params=params,
+                      max_gauges=args.max_gauges, on_row=tick)
+    if args.output:
+        out = Path(args.output)
+        if out.suffix == ".csv":
+            out.write_text(paint.to_csv(res), encoding="utf-8")
+        elif out.suffix == ".geojson":
+            out.write_text(json.dumps(res["geojson"], ensure_ascii=False), encoding="utf-8")
+        elif out.suffix in (".txt", ".md"):
+            out.write_text(paint.methods_text(res), encoding="utf-8")
+        else:
+            out.write_text(json.dumps(res, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
+        print(f"wrote {out}", file=sys.stderr)
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        return
+    print(res["headline"])
+    print()
+    unit = res["question"]["unit"]
+    painted = sorted((r for r in res["rows"] if r.get("status") == "painted" and r.get("value") is not None),
+                     key=lambda r: -abs(float(r["value"])))
+    for r in painted[: args.top]:
+        sig = " *" if r.get("fdr_significant") else ""
+        p = f", p = {r['p']:.3f}" if r.get("p") is not None else ""
+        print(f"  {r['key']} {r.get('name') or ''}: {r['value']:+g} {unit}{p}{sig}")
+    if len(painted) > args.top:
+        print(f"  ... and {len(painted) - args.top} more (--output table.csv for all; * significant after the FDR)")
+    print()
+    print(res["methods"])
+
+
 def cmd_gym(args: argparse.Namespace) -> None:
     """`aquascope gym basins|run|leaderboard`: AquaScope Bench, the calibration environment over real basins (Phase 0),
     `aquascope gym tasks|bench|leaderboard FILES`: the playbook benchmark (Phase 1), `aquascope gym plans
@@ -5113,6 +5166,27 @@ def main() -> None:
     p_area.add_argument("--output", "-o", default=None, help="Write .xlsx, .csv, .geojson or .json")
     p_area.add_argument("--json", action="store_true")
 
+    p_paint = sub.add_parser(
+        "paint", help="Paint one question over every Archive gauge in a box: flood or low-flow trend with field "
+                      "significance, or the baseflow index (experimental)",
+    )
+    p_paint.add_argument("--question", default="flood_trend",
+                         choices=["flood_trend", "low_flow_trend", "baseflow_index"])
+    p_paint.add_argument("--bbox", default=None,
+                         help="west,south,east,north (write --bbox=-8,49.8,2,59 when it starts with a minus)")
+    p_paint.add_argument("--min-years", type=int, default=20, help="Complete years a gauge needs (default 20)")
+    p_paint.add_argument("--start-year", type=int, default=None, help="Use the years from this one on")
+    p_paint.add_argument("--end-year", type=int, default=None, help="Use the years up to this one")
+    p_paint.add_argument("--year-start-month", type=int, default=None,
+                         help="Month the year starts in (default: October north, April south for floods)")
+    p_paint.add_argument("--alpha", type=float, default=0.05, help="Global significance level (default 0.05)")
+    p_paint.add_argument("--independent", action="store_true",
+                         help="Treat the gauges as independent: FDR at alpha, not 2 alpha (Wilks 2016)")
+    p_paint.add_argument("--max-gauges", type=int, default=300, help="Gauges read at most (default 300)")
+    p_paint.add_argument("--top", type=int, default=15, help="Gauges listed, largest change first (default 15)")
+    p_paint.add_argument("--output", "-o", default=None, help="Write .csv, .geojson, .json or .txt (methods)")
+    p_paint.add_argument("--json", action="store_true")
+
     p_gym = sub.add_parser(
         "gym",
         help="AquaScope Bench (was HydroGym): hydrology agents scored on real sites (#175)",
@@ -5745,6 +5819,7 @@ def main() -> None:
         "assess": cmd_assess,
         "context": cmd_context,
         "area-study": cmd_area_study,
+        "paint": cmd_paint,
         "gym": cmd_gym,
         "caravan": cmd_caravan,
         "ask": cmd_ask,

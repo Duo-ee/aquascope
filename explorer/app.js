@@ -57,6 +57,7 @@ import { initMapActions } from "./src/map-actions.js?v=__BUILD__";  // the AI's 
 import { initMapCommand } from "./src/map-command.js?v=__BUILD__";  // Ask the map (#561)
 import { initScout } from "./src/scout.js?v=__BUILD__";  // Scout (#563): pins on what stands out
 import { initWhatIf } from "./src/whatif-map.js?v=__BUILD__";  // What if, on the map (#565)
+import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
 import { initFloodIt } from "./src/floodsim-map.js?v=__BUILD__";  // Flood it, a screening flood on the GPU (#658)
 
 import { initMetrics } from "./src/metrics-ui.js?v=__BUILD__";
@@ -213,6 +214,7 @@ function bringMapOnline(url) {
   initMeshViews();
   initMapActions();   // after every layer it can switch (#561)
   initWhatIf();       // its slot in the action log (#565)
+  initPaint();        // Paint this view, and its slot in the action log (#657)
   initFloodIt();      // Flood it on the reach card, and its slot in the action log (#658)
   // A selection made while the map was still dark has nothing on the map yet.
   if (state.selected) {

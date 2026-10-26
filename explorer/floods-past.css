@@ -16,7 +16,7 @@ body.workbench-mode .map-legends { display: none; }
 }
 
 .map-legend {
-  width: 17rem; max-width: calc(100vw - 24px); max-height: calc(100vh - 220px); overflow-y: auto;
+  width: 17rem; max-width: calc(100vw - 24px); max-height: calc(100vh - 310px); overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--surface); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-1);

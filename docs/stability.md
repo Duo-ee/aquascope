@@ -136,6 +136,7 @@ benchmark:
   tool `mesh_lenses` and `aquascope mesh lenses`; `aquascope.groundwater.views` (contours, flow and capture zones, #623,
   #624); `aquascope.groundwater.layers` and `aquascope.groundwater.budget` (MODFLOW layers, sections and the water budget, #625, #626), with
   their flags of `aquascope modflow` and arguments of `modflow_heads`.
+- **Added since 1.0.0:** `aquascope.paint` (Paint the globe, #657), `aquascope paint` and the MCP tool `paint_map`.
 - **Flood it spike (#658):** `aquascope.floodsim`, the local-inertial screening flood behind the Explorer's
   Flood it button (no CLI verb or MCP tool yet).
 

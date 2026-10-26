@@ -126,6 +126,7 @@ nav:
     - MODFLOW heads on the map: modflow.md
     - Flood it, a screening flood (spike): floodsim.md
     - The Explorer (click any gauge): explorer.md
+    - Paint the globe (map-scale studies): paint.md
     - The evidence ladder (model skill at gauges): evidence.md
     - The monthly bulletin (state of the rivers): bulletin.md
     - Save and share a study: adoption/sharing.md
