@@ -410,6 +410,15 @@ function whatIfButton(t) {
   };
 }
 
+// Route it (#656): a flood wave from this reach down the river, drawn on the lines and played on the time bar.
+function routeButton(t) {
+  return {
+    id: "route", label: "Route a flood", hidden: !actions.openRoute || !t,
+    title: "Send a flood or a release down the river from here: when it reaches each town and gauge, and how big",
+    onClick: () => { if (t && actions.openRoute) actions.openRoute(t); },
+  };
+}
+
 const studyButton = () => ({
   id: "study", label: "Study", title: "A complete study at this place, planned with you, with a report",
   onClick: () => actions.openStudy({ fresh: true }),
@@ -610,7 +619,8 @@ function onSnap(m, snap) {
     details: () => openDetails("panel-point", "now"),
     // A reach taken from the offer above gets its Trace button back.
     buttons: [traceButton("pt", { ready: Boolean(m.reach) }),
-      ...(m.spec.buttons || []).filter((b) => b.id !== "trace" && b.id !== "reach" && b.id !== "whatif"),
+      ...(m.spec.buttons || []).filter((b) => !["trace", "reach", "whatif", "route"].includes(b.id)),
+      routeButton({ river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon, name: named ? named.name : "" }),
       whatIfButton({ kind: "reach", river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon })],
   });
   void loadForecast(m, snap);
@@ -732,8 +742,9 @@ export function initMapCard() {
         const g = state.selected;
         const btn = whatIfButton({ kind: "gauge", river_id: reach.river_id, lat: g.lat, lon: g.lon, source: g.source,
           station_id: g.station_id, name: g.name || g.station_id });
-        const others = (model.spec.buttons || []).filter((b) => b.id !== "whatif");
-        updateCard(model.id, { buttons: [...others, btn] });
+        const others = (model.spec.buttons || []).filter((b) => b.id !== "whatif" && b.id !== "route");
+        const rt = routeButton({ river_id: reach.river_id, lat: reach.lat, lon: reach.lon, name: g.name || g.station_id });
+        updateCard(model.id, { buttons: [...others, rt, btn] });
       }
     });
   }

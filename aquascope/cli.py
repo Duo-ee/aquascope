@@ -1180,6 +1180,66 @@ def cmd_map(args: argparse.Namespace) -> None:
         print(f"\n  {res['credit']}")
 
 
+def cmd_route(args: argparse.Namespace) -> None:
+    """`aquascope route flood|storm|check`: a flood wave down GEOGLOWS's own river network, Muskingum routing (#656)."""
+    from aquascope import routing
+
+    for name in ("aquascope", "httpx"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    if args.route_cmd == "check":
+        res = routing.retro_check(args.upstream, args.downstream, args.start, args.end, spin_up_h=args.spin_up,
+                                  lateral=args.lateral)
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+        r, b = res["routed"], res["no_routing"]
+        print(f"  Reach {res['upstream']} to {res['downstream']} ({res['n_path']} reaches, {res['n_tributaries_read']} "
+              f"tributaries read, sum of k {res['k_path_h']} h), {res['start']} to {res['end']}, hourly")
+        print(f"  {'':<14}{'NSE':>8}{'bias %':>9}{'peak %':>9}{'timing h':>10}")
+        for label, m in (("routed", r), ("no routing", b)):
+            print(f"  {label:<14}{m['nse']:>8.3f}{m['bias_pct']:>9.1f}{m['peak_error_pct']:>9.1f}{m['peak_timing_h']:>10.1f}")
+        print(f"  GEOGLOWS retrospective peak {res['retro_peak_cms']:,.0f} m3/s on {res['retro_peak_time']}")
+        return
+    if args.route_cmd == "storm":
+        try:
+            ring = json.loads(args.polygon)
+        except json.JSONDecodeError as exc:
+            print(f"  --polygon is not JSON: {exc}")
+            sys.exit(1)
+        res = routing.route_storm(ring, rain_mm=args.rain, duration_h=args.duration, runoff_coefficient=args.runoff,
+                                  hours=args.hours, frames=False)
+    else:
+        if args.river is None and args.at is None:
+            print("  Give a river_id, or --at LAT LON to snap.")
+            sys.exit(1)
+        if args.peak is None and args.rp is None:
+            print("  Give --peak (m3/s) or --rp (years).")
+            sys.exit(1)
+        lat, lon = (args.at or (None, None))
+        res = routing.route(args.river, lat=lat, lon=lon, peak_cms=args.peak, return_period=args.rp,
+                            duration_h=args.duration, shape=args.shape, hours=args.hours, along=not args.no_places,
+                            frames=False)
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        return
+    if not res.get("ok"):
+        print(f"  {res.get('error')}")
+        sys.exit(1)
+    print(f"  {res['message']}")
+    rows = res.get("places") or []
+    if rows:
+        print(f"\n  {'On the way':<44}{'km':>8}{'front':>9}{'peak':>9}{'m3/s':>10}{'flatter':>9}")
+        for p in rows[:40]:
+            if not p.get("reached"):
+                continue
+            ph = "n/a" if p["peak_h"] is None else f"{p['peak_h']:.0f} h"
+            print(f"  {str(p['name'])[:43]:<44}{p['along_km']:>8.0f}{p['front_h']:>7.0f} h{ph:>9}"
+                  f"{p['peak_cms']:>10,.0f}{p['attenuation_pct']:>8.0f}%")
+    for note in res.get("notes") or []:
+        print(f"  {note}")
+    print(f"  {res['attribution']}")
+
+
 def cmd_whatif(args: argparse.Namespace) -> None:
     """`aquascope whatif`: a scenario for a reach's basin, carried down the river (#565)."""
     from aquascope import whatif_map as wm
@@ -4825,6 +4885,39 @@ def main() -> None:
     p_map.add_argument("--api-key", default=None)
     p_map.add_argument("--today", default=None, help="Read dates as if today were YYYY-MM-DD")
     p_map.add_argument("--json", action="store_true")
+    # ── route it (#656) ─────────────────────────────────────────────
+    p_route = sub.add_parser("route", help="A flood wave down GEOGLOWS's own river network (Muskingum routing): "
+                             "the Explorer's Route a flood from here")
+    route_sub = p_route.add_subparsers(dest="route_cmd", required=True)
+    p_rf = route_sub.add_parser("flood", help="Water entering at a reach, routed to the sea: peak, timing and "
+                                "attenuation per reach, with the gauges on the way")
+    p_rf.add_argument("river", nargs="?", type=int, default=None, help="A GEOGLOWS v2 river_id")
+    p_rf.add_argument("--at", nargs=2, type=float, metavar=("LAT", "LON"), help="Snap this point first")
+    p_rf.add_argument("--peak", type=float, default=None, help="The peak flow entering, m3/s")
+    p_rf.add_argument("--rp", type=float, default=None, help="Or the reach's T-year flow (GEOGLOWS simulated record)")
+    p_rf.add_argument("--duration", type=float, default=24.0, help="Hours the water enters for (24)")
+    p_rf.add_argument("--shape", choices=["triangle", "block"], default="triangle",
+                      help="triangle (peaks at a third of the duration) or block (a release)")
+    p_rf.add_argument("--hours", type=int, default=None, help="Hours to route (default: until the peak has passed)")
+    p_rf.add_argument("--no-places", action="store_true", help="Skip tracing the path for the gauges on it")
+    p_rf.add_argument("--json", action="store_true")
+    p_rs = route_sub.add_parser("storm", help="A storm over a polygon, a runoff coefficient, routed down the rivers")
+    p_rs.add_argument("--polygon", required=True, help='A ring of [lon, lat] as JSON: "[[7,47],[8,47],[8,48]]"')
+    p_rs.add_argument("--rain", type=float, required=True, help="Rain depth, mm")
+    p_rs.add_argument("--duration", type=float, default=6.0, help="Hours the rain falls over (6)")
+    p_rs.add_argument("--runoff", type=float, default=0.3, help="Share of the rain that runs off (0.3)")
+    p_rs.add_argument("--hours", type=int, default=None)
+    p_rs.add_argument("--json", action="store_true")
+    p_rc = route_sub.add_parser("check", help="Route GEOGLOWS's hourly retrospective between two reaches and compare "
+                                "with its own retrospective downstream (needs numcodecs)")
+    p_rc.add_argument("upstream", type=int)
+    p_rc.add_argument("downstream", type=int)
+    p_rc.add_argument("start", help="YYYY-MM-DD")
+    p_rc.add_argument("end", help="YYYY-MM-DD")
+    p_rc.add_argument("--spin-up", type=int, default=240, help="Hours routed before the window, not scored (240)")
+    p_rc.add_argument("--lateral", choices=["specific", "none"], default="specific",
+                      help="The path's own catchments: area times the tributaries' specific runoff, or nothing")
+    p_rc.add_argument("--json", action="store_true")
     # ── what if, on the map (#565) ───────────────────────────────────
     p_wi = sub.add_parser("whatif", help="A what-if scenario for a river reach's basin (GR4J) and its change carried "
                           "down the river: the Explorer's What if on the map")
@@ -5733,6 +5826,7 @@ def main() -> None:
         "map": cmd_map,
         "mesh": cmd_mesh,
         "whatif": cmd_whatif,
+        "route": cmd_route,
         "swmm": cmd_swmm,
         "river": cmd_river,
         "evidence": cmd_evidence,

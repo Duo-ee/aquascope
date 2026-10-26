@@ -13,6 +13,8 @@ What is here and why (``docs/stability.md`` has the full policy):
   heads, SWMM). These modules changed in nearly every review of their first week.
 * The MODFLOW views added after 0.27.0 (#625, #626): ``aquascope.groundwater.layers`` (layers, cross-sections,
   a cell's heads over time) and ``aquascope.groundwater.budget`` (the cell-by-cell budget reader).
+* The map that computes (#664): ``aquascope.routing``, ``aquascope route`` and the MCP tools ``route_flood`` and
+  ``route_storm`` (#656), new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -53,6 +55,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.nownext",
     "aquascope.river_path",
     "aquascope.rivers",
+    "aquascope.routing",
     "aquascope.watch",
     "aquascope.waterbalance",
     "aquascope.whatif_map",
@@ -78,6 +81,7 @@ CLI: tuple[str, ...] = (
     "modflow",
     "now",
     "river",
+    "route",
     "swmm",
     "warnings",
     "watch",
@@ -119,6 +123,8 @@ MCP_TOOLS: tuple[str, ...] = (
     "reach_record",
     "river_status_month",
     "river_status_summary",
+    "route_flood",
+    "route_storm",
     "snap_to_river",
     "status_bulletin",
     "swmm_summary",

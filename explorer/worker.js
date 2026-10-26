@@ -1700,6 +1700,37 @@ json.dumps(_out, default=str)
   throw new Error(`unknown groundwater views op ${op}`);
 }
 
+// ── Route it (#656): aquascope.routing, the same functions as `aquascope route` and the MCP tools route_flood and
+// route_storm. Type "route" (the main worker: the routing tables need pandas and the routing scipy): op "flood"
+// routes water entering at a reach down its path to the sea, with the gauges (the page's catalog) and the towns
+// the page read off the basemap placed on the way; op "places" places more towns on a result's path (the page reads
+// them once the path is framed); op "storm" routes a drawn storm's runoff.
+async function routeOp({ id, op, args }) {
+  const payload = JSON.stringify(JSON.stringify({ op: String(op || "flood"), args: args || {} }));
+  const code = `
+import json
+from aquascope import routing as _rt
+_a = json.loads(${payload})
+_k = dict(_a["args"])
+try:
+    if _a["op"] == "flood":
+        _rid = _k.pop("river_id", None)
+        _out = _rt.route(_rid, **_k)
+    elif _a["op"] == "storm":
+        _poly = _k.pop("polygon")
+        _out = _rt.route_storm(_poly, **_k)
+    elif _a["op"] == "places":
+        _out = {"places": _rt.places_on_path(_k.get("result") or {}, _k.get("places") or [])}
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, RuntimeError, LookupError, TypeError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+json.dumps(_out, default=str)
+`;
+  const out = await pyodide.runPythonAsync(code);
+  post("result", { id, result: JSON.parse(out) });
+}
+
 self.onmessage = async (e) => {
   const m = e.data;
   try {
@@ -1737,6 +1768,7 @@ self.onmessage = async (e) => {
     if (m.type === "mesh_review") return await meshReviewOp(m);
     if (m.type === "flood_exposure") return await floodExposureOp(m);
     if (m.type === "whatif" || m.type === "whatif_words") return await whatIf(m);
+    if (m.type === "route") return await routeOp(m);
     if (m.type === "groundwater") return await groundwater(m);
     if (m.type === "gw_layers") return await gwLayers(m);
   } catch (err) {

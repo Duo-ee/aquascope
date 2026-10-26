@@ -63,6 +63,7 @@ export function slotOf(action, id) {
     case "draw_area": return `area:${id}`;
     case "add_pin": return `pin:${id}`;
     case "what_if": return "whatif";   // one what-if painted at a time (#565); a new run replaces it
+    case "route": return "route";      // one flood wave at a time (#656); a new run replaces it
     default: return null;
   }
 }
