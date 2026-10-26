@@ -343,17 +343,21 @@
             <label><select id="pt-period" aria-label="Which years"></select></label>
           </div>
           <div class="pt-run-row">
-            <span class="pt-note">Archive gauges only; up to 300 a view, the longest records first.</span>
+            <span id="pt-note" class="pt-note">Archive gauges only; up to 300 a view, the longest records first.</span>
             <button id="pt-run" type="submit" class="btn small primary">Paint this view</button>
           </div>
         </form>
+        <p class="pt-asked-row"><span id="pt-asked" class="pt-asked"></span>
+          <button id="pt-change" type="button" class="link-btn pt-change">Change</button></p>
         <div id="pt-bar" class="pt-bar" hidden><span></span></div>
         <p id="pt-status" class="pt-status" role="status" hidden></p>
         <button id="pt-stop" type="button" class="link-btn pt-stop" hidden>Stop</button>
         <div id="pt-result" class="pt-result" hidden>
           <p id="pt-verdict" class="pt-verdict" hidden></p>
           <p id="pt-headline" class="pt-headline"></p>
-          <p class="pt-hint">The key, the counts and the downloads are in the legend (Painted). Click a dot for its gauge.</p>
+          <p class="pt-hint">The key, the counts and the downloads (figure, table, methods) are in the legend, under
+            Painted. Click a dot for its gauge.</p>
+          <button id="pt-more" type="button" class="btn small" hidden>Read more</button>
         </div>
       </section>
       <!-- talk to the map (#561): one line on the map and the action log under it; src/map-command.js and src/map-actions.js -->

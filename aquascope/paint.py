@@ -149,10 +149,10 @@ def year_words(start_month: int) -> str:
 
 def year_labels(index: pd.DatetimeIndex, start_month: int) -> np.ndarray:
     """Each day's hydrological year, named by the calendar year it ends in (water year 2020 is Oct 2019 to Sep 2020)."""
-    years = index.year.to_numpy()
+    years: np.ndarray = np.asarray(index.year, dtype=int)
     if start_month == 1:
         return years
-    return years + (index.month.to_numpy() >= start_month).astype(int)
+    return years + (np.asarray(index.month) >= start_month).astype(int)
 
 
 def annual_series(series: pd.Series, *, stat: str = "max", start_month: int = 10,
@@ -191,8 +191,8 @@ def sen_slope_years(years: Iterable[float], values: Iterable[float]) -> float:
     A missing year stays a gap in time, so the slope is per year even when a year is not complete. With no
     year missing it equals :func:`aquascope.analysis.trends.sens_slope` on the values alone.
     """
-    t = np.asarray(list(years), dtype=float)
-    y = np.asarray(list(values), dtype=float)
+    t: np.ndarray = np.asarray(list(years), dtype=float)
+    y: np.ndarray = np.asarray(list(values), dtype=float)
     i, j = np.triu_indices(len(y), k=1)
     dt = t[j] - t[i]
     ok = dt != 0
@@ -374,7 +374,7 @@ def _sig_rows(signatures: Any) -> dict[str, dict[str, Any]]:
 def _years(sig: dict[str, Any] | None) -> float:
     if not sig:
         return -1.0
-    v = sig.get("record_years")
+    v: Any = sig.get("record_years")
     try:
         f = float(v)
     except (TypeError, ValueError):
@@ -410,7 +410,7 @@ def plan(stations: list[dict[str, Any]], signatures: Any, *, bbox: list[float] |
         if variables is not None and len(variables) and "discharge" not in list(variables):
             continue
         key = _key(str(s["source"]), str(s["station_id"]))
-        row = {"key": key, "source": str(s["source"]), "station_id": str(s["station_id"]),
+        row: dict[str, Any] = {"key": key, "source": str(s["source"]), "station_id": str(s["station_id"]),
                "name": s.get("name") or "", "latitude": lat, "longitude": lon,
                "record_years": _num(_years(sig.get(key)), 4) if key in sig else None}
         site = (row["source"], str(s.get("site_id") or s["station_id"]))
@@ -504,7 +504,7 @@ def benjamini_hochberg(pvalues: list[float], q: float) -> list[bool]:
     """Which p-values the Benjamini-Hochberg procedure rejects at false discovery rate ``q``."""
     from aquascope.area_study import benjamini_hochberg as _bh
 
-    return _bh(pvalues, q=q)
+    return list(_bh(pvalues, q=q))
 
 
 def field_significance(rows: list[dict[str, Any]], *, alpha_global: float = ALPHA_GLOBAL,
@@ -623,7 +623,7 @@ def summarize(question: str, rows: list[dict[str, Any]], *, params: dict[str, An
         features.append({"type": "Feature", "geometry": {"type": "Point",
                                                           "coordinates": [r["longitude"], r["latitude"]]},
                          "properties": props})
-    result = {
+    result: dict[str, Any] = {
         "question": q.public(), "params": {**_params(question, p), "alpha_global": alpha_global,
                                            "correlated": correlated},
         "bbox": [float(x) for x in bbox] if bbox is not None else None,

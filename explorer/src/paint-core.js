@@ -41,18 +41,20 @@ export const PERIODS = [
   { id: "1980", label: "Since 1980", start_year: 1980 },
 ];
 
-// Red where the flow falls, blue where it rises (ColorBrewer RdBu, 7 classes); the middle class is "no change".
-export const DIVERGING = ["#b2182b", "#ef8a62", "#fddbc7", "#f2f2f2", "#d1e5f0", "#67a9cf", "#2166ac"];
+// Red where the flow falls, blue where it rises (ColorBrewer RdBu, 7 classes). The middle class, "no change", is a
+// warm light grey rather than RdBu's white, so a painted gauge never reads as an empty ring.
+export const DIVERGING = ["#b2182b", "#ef8a62", "#fddbc7", "#ddd8cc", "#d1e5f0", "#67a9cf", "#2166ac"];
 // Baseflow index, low to high (ColorBrewer YlGnBu, 6 classes).
 export const SEQUENTIAL = ["#ffffcc", "#c7e9b4", "#7fcdbb", "#41b6c4", "#2c7fb8", "#253494"];
 
 // The gauges that are not painted, said on the map rather than left out.
+// Small and quiet, so the answers stand out, but on the map: the map says where it has no answer.
 export const STATUS_STYLE = {
-  too_short: { label: "Record too short", color: "#8a96a3", ring: "#ffffff", hollow: false },
-  no_archive: { label: "No record in the Archive", color: "#6b7785", ring: "#6b7785", hollow: true },
-  over_cap: { label: "Not read (over the cap; zoom in)", color: "#a9b4bf", ring: "#a9b4bf", hollow: true },
+  too_short: { label: "Record too short", color: "#8a96a3", ring: "#8a96a3", hollow: false },
+  no_archive: { label: "No record in the Archive", color: "#7b8794", ring: "#7b8794", hollow: true },
+  over_cap: { label: "Not read yet (over the cap)", color: "#b3bdc7", ring: "#b3bdc7", hollow: false },
   failed: { label: "Could not be read", color: "#c2410c", ring: "#c2410c", hollow: true },
-  queued: { label: "Reading", color: "#c9d2da", ring: "#ffffff", hollow: false },
+  queued: { label: "Reading", color: "#9fb3c8", ring: "#ffffff", hollow: false },
 };
 
 export const palette = (q) => (q && q.diverging ? DIVERGING : SEQUENTIAL);
@@ -187,19 +189,26 @@ export function paintProps(q) {
   statusRing.push("#ffffff");
   const painted = ["==", ["get", "status"], "painted"];
   const sig = ["==", ["get", "fdr_significant"], true];
+  const queued = ["==", ["get", "status"], "queued"];
   const hollow = ["in", ["get", "status"], ["literal", Object.entries(STATUS_STYLE).filter(([, v]) => v.hollow).map(([k]) => k)]];
   const tested = q.kind === "trend";
+  const size = (z, s, n, v, other) => [z, ["case", painted, tested ? ["case", sig, s, n] : v, queued, other * 1.4, other]];
   return {
     "circle-radius": ["interpolate", ["linear"], ["zoom"],
-      2, ["case", painted, tested ? ["case", sig, 4.6, 3.4] : 3.8, 2],
-      6, ["case", painted, tested ? ["case", sig, 7.5, 5.5] : 6.2, 3],
-      10, ["case", painted, tested ? ["case", sig, 10, 7.5] : 8.5, 4.5]],
+      ...size(2, 4.2, 3.2, 3.6, 1.1), ...size(6, 7, 5.2, 5.8, 1.9), ...size(10, 10, 7.5, 8.5, 3.2)],
     "circle-color": ["case", painted, match, statusColor],
-    "circle-opacity": ["case", hollow, 0, painted, tested ? ["case", sig, 1, 0.62] : 0.95, 0.9],
-    "circle-stroke-color": ["case", painted, tested ? ["case", sig, "#111827", "#ffffff"] : "#33414f", statusRing],
-    "circle-stroke-width": ["case", painted, tested ? ["case", sig, 1.8, 0.8] : 0.8, hollow, 1.4, 0.6],
-    "circle-stroke-opacity": ["case", painted, tested ? ["case", sig, 1, 0.7] : 0.8, 0.9],
+    "circle-opacity": ["case", hollow, 0, painted, tested ? ["case", sig, 1, 0.85] : 0.95, queued, 0.9, 0.55],
+    "circle-stroke-color": ["case", painted, tested ? ["case", sig, "#111827", "#5b6673"] : "#33414f", statusRing],
+    "circle-stroke-width": ["case", painted, tested ? ["case", sig, 1.8, 0.7] : 0.8, hollow, 0.8, 0],
+    "circle-stroke-opacity": ["case", painted, tested ? ["case", sig, 1, 0.75] : 0.8, 0.6],
   };
+}
+
+/** Painted gauges draw over the unread ones, the significant on top. */
+export function paintLayout(q) {
+  const painted = ["==", ["get", "status"], "painted"];
+  const sig = ["==", ["get", "fdr_significant"], true];
+  return { "circle-sort-key": ["case", painted, q.kind === "trend" ? ["case", sig, 3, 2] : 2, 1] };
 }
 
 /** The legend: the classes with their counts, then each unpainted status with its count. */

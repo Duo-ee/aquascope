@@ -34,7 +34,8 @@ def daily(start: str, end: str, seed: int = 0, trend: float = 0.0, drop_years: t
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
 def test_calendar_years_match_the_single_station_trend_exactly(seed):
-    s = daily("1961-03-10", "2020-08-20", seed=seed, trend=0.05 * (seed - 3), drop_years=(1975, 1990) if seed % 2 else ())
+    gaps = (1975, 1990) if seed % 2 else ()
+    s = daily("1961-03-10", "2020-08-20", seed=seed, trend=0.05 * (seed - 3), drop_years=gaps)
     # The annual maxima are the single-station study's, value for value.
     am = paint.annual_series(s, stat="max", start_month=1, min_days=292)
     ref = _annual_max(s)
@@ -177,8 +178,9 @@ def _archive(seed_by_id):
 
 
 def test_paint_end_to_end_with_coverage_said():
+    ids = ["u1", "u2", "u3", "u4", "broken", "short", "gone"]
     stations = [{"source": "usgs", "station_id": sid, "name": sid, "lat": 40 + i * 0.1, "lon": -75.0,
-                 "variables": ["discharge"]} for i, sid in enumerate(["u1", "u2", "u3", "u4", "broken", "short", "gone"])]
+                 "variables": ["discharge"]} for i, sid in enumerate(ids)]
     sigs = [{"source": "usgs", "station_id": sid, "record_years": 60.0, "variable": "discharge"}
             for sid in ["u1", "u2", "u3", "u4", "broken"]] + \
         [{"source": "usgs", "station_id": "short", "record_years": 9.0, "variable": "discharge"}]
@@ -196,8 +198,8 @@ def test_paint_end_to_end_with_coverage_said():
     assert res["licences"] == [{"source": "usgs", "label": res["licences"][0]["label"], "license": "US-PD",
                                 "attribution": res["licences"][0]["attribution"]}]
     m = res["methods"]
-    for words in ("Mann-Kendall", "Sen's (1968)", "Benjamini and Hochberg, 1995", "Wilks (2016)", "October to September",
-                  "1 not mirrored by the Archive", "US-PD", "alpha_FDR = 2 alpha_global = 0.1"):
+    for words in ("Mann-Kendall", "Sen's (1968)", "Benjamini and Hochberg, 1995", "Wilks (2016)",
+                  "October to September", "1 not mirrored by the Archive", "US-PD", "alpha_FDR = 2 alpha_global = 0.1"):
         assert words in m, words
     assert "south of" not in m
     assert any("BAMS-D-15-00267.1" in r for r in res["references"])

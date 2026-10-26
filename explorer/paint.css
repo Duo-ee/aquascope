@@ -5,13 +5,12 @@
 .map-wrap:has(#btn-time:not([hidden])) .maplibregl-ctrl-top-left { margin-top: 170px; }
 
 .paint {
-  position: absolute; left: 54px; top: 10px; z-index: 9; width: 330px; max-width: calc(100% - 70px);
+  position: absolute; right: 12px; top: 112px; z-index: 9; width: 330px; max-width: calc(100% - 70px);
   padding: 11px 13px 12px; background: var(--surface-solid); color: var(--ink); border: 1px solid var(--line);
   border-radius: var(--radius-sm); box-shadow: var(--shadow-2); font-size: .8rem; line-height: 1.4;
   transition: left .16s ease;
 }
 .paint[hidden] { display: none; }
-body.rail-open .paint { left: calc(var(--rail-w) + var(--gap) + 54px); }
 .pt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
 .pt-kicker { margin: 0; font-size: .66rem; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .pt-title { margin: .05rem 0 0; font-size: .95rem; font-weight: 650; line-height: 1.25; }
@@ -20,6 +19,12 @@ body.rail-open .paint { left: calc(var(--rail-w) + var(--gap) + 54px); }
   padding: 0 2px; margin: -2px -4px 0 0;
 }
 .pt-form { margin-top: .5rem; display: grid; gap: .45rem; }
+.pt-asked-row { display: none; margin: .2rem 0 0; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.pt-asked { color: var(--ink-2); font-size: .74rem; font-weight: 600; }
+.pt-change { font-size: .72rem; }
+.paint.ran .pt-form, .paint.ran .pt-title { display: none; }
+.paint.ran .pt-asked-row { display: flex; }
+.paint.ran .pt-kicker { font-size: .62rem; }
 .pt-qs-wrap { border: 0; margin: 0; padding: 0; min-width: 0; }
 .pt-label { padding: 0; font-size: .7rem; color: var(--muted); margin-bottom: .2rem; }
 .pt-qs { display: grid; gap: .25rem; }
@@ -78,7 +83,6 @@ body.rail-open .paint { left: calc(var(--rail-w) + var(--gap) + 54px); }
 
 @media (max-width: 640px) {
   .paint { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-width: none; max-height: 62vh; overflow: auto; z-index: 12; }
-  body.rail-open .paint { left: 8px; }
   .pt-q small { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -22,7 +22,7 @@ import { signaturesUrl } from "./signature-filter-core.js?v=__BUILD__";
 import { announce } from "./a11y.js?v=__BUILD__";
 import {
   ALPHA_GLOBAL, MAX_GAUGES, MAX_GAUGES_PHONE, MIN_YEARS, PERIODS, QUESTIONS, STATUS_STYLE, YEAR_CHOICES,
-  archiveFileUrl, batchesOf, cardFor, figureTitle, fileStem, legendRows, paintProps, palette, planGauges,
+  archiveFileUrl, batchesOf, cardFor, figureTitle, fileStem, legendRows, paintLayout, paintProps, palette, planGauges,
   progressWords, questionById, summaryWords, viewBbox, wrapText,
 } from "./paint-core.js?v=__BUILD__";
 
@@ -111,6 +111,7 @@ function draw() {
   }
   if (shown) {
     for (const [k, v] of Object.entries(paintProps(shown.q))) map.setPaintProperty(LAYER, k, v);
+    for (const [k, v] of Object.entries(paintLayout(shown.q))) map.setLayoutProperty(LAYER, k, v);
     map.setLayoutProperty(LAYER, "visibility", "visible");
     if (map.getLayer(LAYER) && map.getStyle().layers.slice(-1)[0].id !== LAYER) map.moveLayer(LAYER);
   } else if (map.getLayer(LAYER)) {
@@ -167,7 +168,8 @@ function normSpec(spec) {
   const q = questionById(spec && spec.question) || QUESTIONS[0];
   const minYears = Number(spec && spec.min_years) > 0 ? Math.round(Number(spec.min_years)) : MIN_YEARS;
   const start = Number(spec && spec.start_year) > 0 ? Math.round(Number(spec.start_year)) : null;
-  return { question: q.id, min_years: minYears, start_year: start, bbox: (spec && spec.bbox) || null };
+  const cap = Number(spec && spec.max_gauges) > 0 ? Math.round(Number(spec.max_gauges)) : null;
+  return { question: q.id, min_years: minYears, start_year: start, bbox: (spec && spec.bbox) || null, max_gauges: cap };
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -219,7 +221,7 @@ async function run(spec) {
     const sig = await loadSignatures();
     if (!live()) return;
     const plan = planGauges(state.stations || [], sig, {
-      bbox: spec.bbox, minYears: spec.min_years, maxGauges: isPhone() ? MAX_GAUGES_PHONE : MAX_GAUGES,
+      bbox: spec.bbox, minYears: spec.min_years, maxGauges: spec.max_gauges || capFor(),
     });
     shown.order = plan.rows.map((r) => r.key);
     for (const r of plan.rows) shown.rows.set(r.key, r);
@@ -245,24 +247,61 @@ async function run(spec) {
       await readAndAnswer(plan.read, signal, live);
       if (!live()) return;
     }
-    shown.phase = "field";
-    renderPanel();
-    const result = await callCancelable("paint", { op: "summary" }).promise;
-    if (!live()) return;
-    shown.result = result;
-    for (const r of result.rows || []) shown.rows.set(r.key, r);
-    shown.field = result.field;
-    shown.phase = "done";
-    draw();
-    renderPanel();
-    refreshLegend("paint");
-    announce(result.headline || "Painted");
+    await finish(live);
   } catch (err) {
-    if (!live() || err instanceof Cancelled || (err && err.name === "AbortError")) return;
-    shown.phase = "error";
-    shown.error = err.message || String(err);
-    renderPanel();
-    refreshLegend("paint");
+    failed(err, live);
+  }
+}
+
+const capFor = () => (isPhone() ? MAX_GAUGES_PHONE : MAX_GAUGES);
+
+function failed(err, live) {
+  if (!live() || err instanceof Cancelled || (err && err.name === "AbortError")) return;
+  shown.phase = "error";
+  shown.error = err.message || String(err);
+  renderPanel();
+  refreshLegend("paint");
+}
+
+// The whole painting from the worker: the field test over every gauge, the counts, licences and methods.
+async function finish(live) {
+  shown.phase = "field";
+  renderPanel();
+  const result = await callCancelable("paint", { op: "summary" }).promise;
+  if (!live()) return;
+  shown.result = result;
+  for (const r of result.rows || []) shown.rows.set(r.key, r);
+  shown.field = result.field;
+  shown.phase = "done";
+  draw();
+  renderPanel();
+  refreshLegend("paint");
+  announce(result.headline || "Painted");
+}
+
+/** Read the next gauges past the cap (the longest records first), as many again as the cap. */
+export async function paintMore() {
+  if (!shown || shown.phase !== "done" || shown.q.needs !== "daily") return;
+  const more = shown.order.map((k) => shown.rows.get(k)).filter((r) => r && r.status === "over_cap").slice(0, capFor());
+  if (!more.length) return;
+  const my = runId;
+  const spec = shown.spec;
+  const live = () => my === runId && shown && shown.spec === spec;
+  spec.max_gauges = (spec.max_gauges || capFor()) + more.length;   // the log's entry repaints the same gauges
+  for (const r of more) Object.assign(r, { status: "queued", note: "" });
+  shown.readKeys.push(...more.map((r) => r.key));
+  shown.total += more.length;
+  shown.result = null;
+  shown.phase = "read";
+  draw();
+  renderPanel();
+  refreshLegend("paint");
+  try {
+    await readAndAnswer(more, aborter.signal, live);
+    if (!live()) return;
+    await finish(live);
+  } catch (err) {
+    failed(err, live);
   }
 }
 
@@ -371,11 +410,20 @@ function picked() {
     start_year: period.start_year };
 }
 
+function askedWords(spec) {
+  const q = questionById(spec.question);
+  const period = PERIODS.find((p) => p.start_year === (spec.start_year || null));
+  return `${q.short} · at least ${spec.min_years} years · ${period ? period.label.toLowerCase() : `from ${spec.start_year}`}`;
+}
+
 function renderPanel() {
-  const st = $("pt-status"), res = $("pt-result"), bar = $("pt-bar");
+  const p = panel(), st = $("pt-status"), res = $("pt-result"), bar = $("pt-bar");
   if (!st) return;
+  // Once painted, the form folds to one line: the map is the answer, the panel only says how it is going.
+  p.classList.toggle("ran", Boolean(shown) && !p.classList.contains("editing"));
+  $("pt-asked").textContent = shown ? askedWords(shown.spec) : "";
   if (!shown) {
-    st.hidden = true; res.hidden = true; bar.hidden = true;
+    st.hidden = true; res.hidden = true; bar.hidden = true; $("pt-stop").hidden = true;
     return;
   }
   const phase = shown.phase;
@@ -383,13 +431,11 @@ function renderPanel() {
   bar.hidden = !reading;
   const share = shown.total ? Math.min(1, shown.done / shown.total) : (phase === "plan" ? 0.02 : 0);
   bar.querySelector("span").style.width = `${Math.round(share * 100)}%`;
-  st.hidden = false;
   st.className = `pt-status${phase === "error" ? " error" : ""}`;
   if (phase === "error") st.textContent = `The painting stopped: ${shown.error}`;
   else if (phase === "stopped") st.textContent = `Stopped after ${shown.done} of ${shown.total} gauges.`;
-  else if (phase === "done") st.textContent = "";
   else st.textContent = progressWords({ done: shown.done, total: shown.total, failed: shown.failed, phase });
-  if (phase === "done") st.hidden = true;
+  st.hidden = phase === "done";
   $("pt-stop").hidden = !reading;
   const r = shown.result;
   res.hidden = !r;
@@ -401,6 +447,9 @@ function renderPanel() {
       $("pt-verdict").className = `pt-verdict ${f.field_significant ? "sig" : "nsig"}`;
       $("pt-verdict").textContent = f.field_significant ? "Field significant" : "Field not significant";
     }
+    const over = (r.counts && r.counts.over_cap) || 0;
+    $("pt-more").hidden = !over || shown.q.needs !== "daily";
+    $("pt-more").textContent = `Read ${Math.min(over, capFor())} more`;
   }
 }
 
@@ -422,13 +471,16 @@ function legendHtml() {
   const f = shown.field;
   const verdict = f && f.n_tested ? `<p class="pt-field ${f.field_significant ? "sig" : "nsig"}">${escapeHtml(f.verdict)}</p>` : "";
   const reading = L.reading ? `<p class="ml-when">${escapeHtml(progressWords({ done: shown.done, total: shown.total, failed: shown.failed, phase: shown.phase }))}</p>` : "";
-  const unit = q.unit ? `<p class="ml-when">${escapeHtml(q.label)}, ${escapeHtml(q.unit)}</p>` : `<p class="ml-when">${escapeHtml(q.label)}</p>`;
+  const unit = `<p class="ml-when">${escapeHtml(q.label)}${q.unit ? `, ${escapeHtml(q.unit)}` : ""}. The painted dots stand in ` +
+    "for the gauge marks.</p>";
   const lic = shown.result ? (shown.result.licences || []).map((l) => `${l.label} (${l.license})`).join("; ") : "";
   const done = shown.phase === "done";
   return unit + reading + classes + sigKey + status + verdict +
     (done ? '<p class="pt-acts"><button type="button" class="ml-btn" data-act="png">Figure (PNG)</button>' +
       '<button type="button" class="ml-btn" data-act="csv">Table (CSV)</button>' +
       '<button type="button" class="ml-btn" data-act="methods">Methods</button>' +
+      ((shown.result && shown.result.counts.over_cap && q.needs === "daily")
+        ? `<button type="button" class="ml-btn" data-act="more">Read ${Math.min(shown.result.counts.over_cap, capFor())} more</button>` : "") +
       '<button type="button" class="ml-btn quiet" data-act="again">Change</button></p>' : "") +
     `<p class="ml-src">Daily discharge from the AquaScope Archive${lic ? `: ${escapeHtml(lic)}` : ""}. ` +
     "Mirrored gauges only: where the Archive has no record, the map says so.</p>";
@@ -446,7 +498,8 @@ function registerRow() {
       if (name === "png") void exportPng(el);
       if (name === "csv") void exportText("csv", el);
       if (name === "methods") void exportText("methods", el);
-      if (name === "again") openPanel();
+      if (name === "again") { panel().classList.add("editing"); openPanel(); }
+      if (name === "more") void paintMore();
     },
   });
 }
@@ -543,8 +596,8 @@ export async function figureCanvas() {
     ctx.beginPath();
     ctx.arc(x, y, 5 * dpr, 0, 2 * Math.PI);
     if (it.kind === "class") { ctx.fillStyle = it.color; ctx.fill(); ctx.strokeStyle = "#33414f"; ctx.lineWidth = 0.8 * dpr; ctx.stroke(); }
-    else if (it.kind === "sig") { ctx.fillStyle = palette(q)[1]; ctx.fill(); ctx.strokeStyle = "#111827"; ctx.lineWidth = 1.8 * dpr; ctx.stroke(); }
-    else if (it.kind === "nsig") { ctx.globalAlpha = 0.62; ctx.fillStyle = palette(q)[1]; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.8 * dpr; ctx.stroke(); }
+    else if (it.kind === "sig") { ctx.fillStyle = palette(q)[5]; ctx.fill(); ctx.strokeStyle = "#111827"; ctx.lineWidth = 1.8 * dpr; ctx.stroke(); }
+    else if (it.kind === "nsig") { ctx.globalAlpha = 0.85; ctx.fillStyle = palette(q)[5]; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = "#5b6673"; ctx.lineWidth = 0.7 * dpr; ctx.stroke(); }
     else if (it.hollow) { ctx.strokeStyle = it.color; ctx.lineWidth = 1.4 * dpr; ctx.stroke(); }
     else { ctx.fillStyle = it.color; ctx.fill(); }
     ctx.fillStyle = "#111827";
@@ -597,6 +650,7 @@ function buildForm() {
     `<span><b>${escapeHtml(q.label)}</b><small>${escapeHtml(q.describe)}</small></span></label>`).join("");
   $("pt-years").innerHTML = YEAR_CHOICES.map((y) => `<option value="${y}"${y === MIN_YEARS ? " selected" : ""}>${y}</option>`).join("");
   $("pt-period").innerHTML = PERIODS.map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join("");
+  $("pt-note").textContent = `Archive gauges only; up to ${capFor()} a view, the longest records first.`;
 }
 
 export function initPaint() {
@@ -613,16 +667,19 @@ export function initPaint() {
   p.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); showPanel(false); } });
   $("pt-form").addEventListener("submit", (e) => {
     e.preventDefault();
+    p.classList.remove("editing");
     void paintView(picked(), { by: "rules", label: `Paint this view: ${questionById(picked().question).short}` });
   });
   $("pt-stop").addEventListener("click", stopPainting);
+  $("pt-more").addEventListener("click", () => void paintMore());
+  $("pt-change").addEventListener("click", () => { p.classList.add("editing"); renderPanel(); });
   onWorkerRestart(() => { if (shown && shown.phase !== "done") stopPainting(); });
   // The AI action paint (map-actions.js) and agents reach it here.
   actions.paintMap = (spec, opts) => paintView(spec, opts);
   actions.paintState = () => (shown ? { ...shown.spec } : null);
   globalThis.__aq = globalThis.__aq || {};
   globalThis.__aq.paint = {
-    paint: paintView, stop: stopPainting, clear, shown: () => shown, figure: figureCanvas,
+    paint: paintView, more: paintMore, stop: stopPainting, clear, shown: () => shown, figure: figureCanvas,
     status: () => (shown ? STATUS_STYLE : null),
   };
 }
