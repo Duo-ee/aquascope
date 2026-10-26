@@ -100,7 +100,16 @@ downstream, and it can be coloured by today's flow against its normal. Floods pa
 floods were reported in the news or seen by radar, month by month. **Ask the map** moves the
 view, switches layers and sets the date from plain words. **Explain this view** and **Scout**
 pin short notes and findings on the globe, every number taken from the data. Each action is
-logged and can be undone, and all of it works without a key.
+logged and can be undone, and all of it works without a key. With Chrome's built-in model or
+your own key, the model only picks which facts and actions to use; the code writes every number
+([assessment](docs/assessments/ai-on-the-map.md)).
+
+**Your own model results on the map:** drop a HEC-RAS 2D or UGRID result and see smooth depth,
+depth contours, 3D, hazard and arrival-time lenses, a cross-section and hydrograph you draw,
+and the buildings, roads and people under the water. Drop a MODFLOW run and see head contours,
+flow arrows, drawdown, capture zones, the layers in 3D, cross-sections and the water budget.
+Samples are one click away, and the files never leave your browser
+([mesh](docs/mesh.md), [MODFLOW](docs/modflow.md)).
 
 **Study** guides you from a question through a plan you approve to a report and export
 bundle: Word, Excel, figures, notebook, findings and study YAML. Core studies run without
@@ -598,8 +607,8 @@ If you use AquaScope in your research, please cite:
   author  = {Ouédraogo, Abdoul Rachid},
   year    = {2026},
   url     = {https://github.com/Rekin226/aquascope},
-  version = {0.27.0},
-  doi     = {10.5281/zenodo.23301359},
+  version = {1.0.0},
+  doi     = {10.5281/zenodo.21903143},
   license = {MIT}
 }
 ```
