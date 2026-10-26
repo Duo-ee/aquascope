@@ -117,6 +117,8 @@ const TOOLS = [
       + "playing}, set_layer {layer, on}, focus_status {classes: much_below, below, normal, above, much_above}, "
       + "set_basemap {basemap}, highlight_river {place | lat, lon, direction upstream|downstream|both}, "
       + "draw_area {bbox | place, label}, add_pin {lat, lon, title, text, facts [{label, value, unit}], source}, "
+      + "route {place | lat, lon | at: here, peak_cms | return_period, duration_h, shape triangle|block} (a flood "
+      + "wave down the river, #656). "
       + "paint {question flood_trend|low_flow_trend|baseflow_index, place | bbox (none: the view), min_years}: "
       + "every gauge in the box answered by aquascope.paint and painted, with field significance. "
       + "Each is checked before it runs; place names are looked up in the gazetteer.",

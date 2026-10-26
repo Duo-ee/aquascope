@@ -42,14 +42,21 @@ from aquascope.map_layers import STATUS_CLASSES
 
 __all__ = [
     "ACTION_TYPES", "BASEMAPS", "DIRECTIONS", "EXAMPLES", "LAYERS", "PHOTON_URL", "PLACE_CREDIT", "REGIONS",
+    "ROUTE_DEFAULT_RP", "ROUTE_LIMITS", "ROUTE_SHAPES",
     "action_schema", "describe_action", "model_command", "model_prompt", "parse_command", "parse_model_reply",
     "reply_schema", "resolve_actions", "resolve_place", "validate_action", "validate_actions",
 ]
 
 ACTION_TYPES = (
     "fly_to", "set_time", "set_layer", "focus_status", "set_basemap", "highlight_river", "draw_area", "add_pin",
+    "route",
     "paint",
 )
+#: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
+ROUTE_SHAPES = ("triangle", "block")
+ROUTE_LIMITS = {"peak_cms": (0.0, 1_000_000.0), "return_period": (1.01, 1000.0), "duration_h": (0.0, 720.0)}
+#: The flood routed when the words give no size: the 10-year flow of the reach (GEOGLOWS simulated record).
+ROUTE_DEFAULT_RP = 10.0
 DIRECTIONS = ("upstream", "downstream", "both")
 STEPS = ("day", "week", "month")
 STATUS_IDS = tuple(c["id"] for c in STATUS_CLASSES)
@@ -307,6 +314,14 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "direction": {"type": "string", "enum": list(DIRECTIONS)},
                         "lat": num,
                         "lon": num,
+                        "peak_cms": {"type": "number", "description": "route: the peak flow entering, m3/s"},
+                        "return_period": {"type": "number",
+                                          "description": "route: or the reach's T-year flow, in years"},
+                        "duration_h": {"type": "number", "description": "route: hours the water enters for"},
+                        "shape": {"type": "string", "enum": list(ROUTE_SHAPES),
+                                  "description": "route: triangle (a flood) or block (a release)"},
+                        "at": {"type": "string", "enum": ["here", "center"],
+                               "description": "route: from the river selected on the map (here)"},
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
@@ -578,6 +593,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
             out["label"] = label
         return out, None
 
+    if kind == "route":
+        return _validate_route(action, out, place)
     if kind == "paint":
         if action.get("question") not in PAINT_QUESTIONS:
             return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
@@ -635,6 +652,44 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
     source = _text(action.get("source"), 200)
     if source:
         out["source"] = source
+    return out, None
+
+
+def _validate_route(action: dict[str, Any], out: dict[str, Any], place: str | None
+                    ) -> tuple[dict[str, Any] | None, str | None]:
+    """Route it (#656): where the water enters (a point, a place, or ``at: here``, the river selected on the map)
+    and what enters (``peak_cms`` or ``return_period``, the 10-year flow when neither, ``duration_h``, ``shape``)."""
+    point = _latlon(action.get("lat"), action.get("lon"))
+    if point:
+        out["lat"], out["lon"] = point
+    elif place:
+        out["place"] = place
+    elif action.get("at") in ("here", "center"):
+        out["at"] = "here"
+    else:
+        return None, "route needs a place, a lat and lon, or at: here (the river selected on the map)"
+    for key in ("peak_cms", "return_period", "duration_h"):
+        v = action.get(key)
+        if v is None:
+            continue
+        if not _finite(v):
+            return None, f"route's {key} must be a number"
+        lo, hi = ROUTE_LIMITS[key]
+        if not (lo < float(v) <= hi):
+            return None, f"route's {key} must be above {lo:g} and at most {hi:g}"
+        out[key] = round(float(v), 3)
+    if "peak_cms" in out:
+        out.pop("return_period", None)
+    elif "return_period" not in out:
+        out["return_period"] = ROUTE_DEFAULT_RP
+    out.setdefault("duration_h", 24.0)
+    shape = action.get("shape") or "triangle"
+    if shape not in ROUTE_SHAPES:
+        return None, f"route's shape must be one of {', '.join(ROUTE_SHAPES)}"
+    out["shape"] = shape
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
     return out, None
 
 
@@ -708,6 +763,16 @@ def describe_action(a: dict[str, Any]) -> str:
         return f"Outline {a.get('label') or a.get('place') or 'an area'}"
     if kind == "add_pin":
         return f"Pin: {a.get('title')}"
+    if kind == "route":
+        where = a.get("label") or a.get("place") or ("the selected river" if a.get("at") == "here" else
+                                                     f"{a.get('lat'):.2f}, {a.get('lon'):.2f}")
+        hours = float(a.get("duration_h") or 24.0)
+        span = f"{hours / 24:g} days" if hours >= 48 and hours % 24 == 0 else f"{hours:g} h"
+        if a.get("peak_cms") is not None:
+            what = f"{float(a['peak_cms']):,.0f} m³/s" + (" released" if a.get("shape") == "block" else "")
+        else:
+            what = f"the {float(a.get('return_period') or ROUTE_DEFAULT_RP):g}-year flood"
+        return f"Route {what} over {span} from {where}"
     if kind == "paint":
         where = a.get("label") or a.get("place") or ("the box" if a.get("bbox") else "this view")
         return f"Paint {where}: {PAINT_QUESTIONS[a['question']]['label']}"
@@ -949,6 +1014,55 @@ def _zoom_phrase(c: _Clause) -> None:
         c.add("zoom", {"type": "fly_to", "zoom_by": sign * size})
 
 
+_FLOW_UNIT = r"(?:m3/s|m³/s|m3 s-1|m3s-1|cumecs|cms|cubic met(?:re|er)s? (?:a|per) second)"
+
+
+def _route_phrase(c: _Clause) -> None:
+    """Route it (#656): "route a flood of 500 m3/s from Basel", "release 800 m3/s for 2 days from here",
+    "route the 100-year flood down the Rhine from Basel", "send a flood down the river from here"."""
+    m = re.search(
+        r"^(?P<verb>route|send|release|run|let go)\s+(?:a\s+|an\s+|the\s+)?"
+        r"(?:(?P<rp>\d{1,4})[- ]?(?:year|yr)s?\s+)?(?P<what>flood|wave|flood wave|release|pulse|water)?\s*"
+        r"(?:of\s+)?(?:(?P<q>\d[\d,]*(?:\.\d+)?)\s*" + _FLOW_UNIT + r"\s*)?"
+        r"(?:(?:flood|wave|release|pulse|water)\s+)?"
+        r"(?:(?:for|over)\s+(?P<d>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|ten)\s*"
+        r"(?P<du>hours?|hrs?|h|days?|d)\s+)?"
+        r"(?P<tail>.*)$", c.text)
+    if not m or not (m.group("what") or m.group("q") or m.group("verb") == "release"):
+        return
+    tail = re.sub(r"\s*(?:all the way\s+)?(?:down\s+)?to\s+the\s+(?:sea|ocean)$", "", m.group("tail").strip())
+    t = re.fullmatch(r"(?:down\s+(?:the\s+)?(?P<river>.+?))?\s*(?:(?:from|at|starting at)\s+(?P<p>.+))?", tail)
+    if t is None:
+        return
+    if m.group("verb") in ("run", "let go") and not m.group("what"):
+        return
+    action: dict[str, Any] = {"type": "route"}
+    if m.group("q"):
+        action["peak_cms"] = float(m.group("q").replace(",", ""))
+    elif m.group("rp"):
+        action["return_period"] = float(m.group("rp"))
+    if m.group("d"):
+        n = m.group("d")
+        num = float(n) if re.match(r"\d", n) else float(_WORD_NUMBERS.get(n, 1))
+        action["duration_h"] = num * (24.0 if m.group("du").startswith("d") else 1.0)
+    if m.group("verb") == "release" or m.group("what") in ("release", "pulse"):
+        action["shape"] = "block"
+    where = (t.group("p") or "").strip()
+    river = (t.group("river") or "").strip()
+    if not where or where in ("here", "this river", "this reach", "the selected river", "this point"):
+        if river and river not in ("river", "this river"):
+            action["place"] = _place_text(_raw_span(c, river))
+        else:
+            action["at"] = "here"
+    else:
+        name = _place_text(_raw_span(c, where))
+        if river and river not in ("river", "this river"):
+            name = f"{_place_text(_raw_span(c, river))} at {name}"
+        action["place"] = name
+    c.text = ""
+    c.add("route", action)
+
+
 def _river_phrase(c: _Clause) -> None:
     patterns = [
         (r"^(?:show(?: me)?\s+)?(?:the\s+)?(?:way|path|route)\s+(?:of|from)\s+(?:the\s+)?(?P<p>.+?)"
@@ -1136,7 +1250,7 @@ def _place_phrase(c: _Clause) -> None:
 
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
-                                      "highlight_river", "add_pin", "paint"))}
+                                      "highlight_river", "route", "add_pin", "paint"))}
 
 
 def _parse_clause(raw: str, today: date) -> _Clause:
@@ -1144,7 +1258,8 @@ def _parse_clause(raw: str, today: date) -> _Clause:
     c.text = re.sub(r"^(?:please|hey|ok|okay|now|can you|could you|would you|i want to|i'd like to|let me|let's)\s+",
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
-    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _river_phrase):
+    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _route_phrase,
+                 _river_phrase):
         step(c)
         if c.actions:
             return c
@@ -1422,7 +1537,7 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
         if not a.get("place"):
             out.append({k: v for k, v in a.items() if k != "river"})
             continue
-        want = "river" if a.get("river") or a["type"] == "highlight_river" else "any"
+        want = "river" if a.get("river") or a["type"] in ("highlight_river", "route") else "any"
         # "the Nile at Khartoum": the river, found where the second place is.
         river_at = re.match(r"^(?P<river>.+?)\s+(?:at|near|by|in)\s+(?P<where>.+)$", a["place"]) \
             if want == "river" else None
@@ -1457,6 +1572,11 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 continue
             if hit.get("lat") is None:
                 notes.append(f"{a['place']} has no position to start the river from")
+                continue
+            b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
+        elif a["type"] == "route":
+            if hit.get("lat") is None:
+                notes.append(f"{a['place']} has no position to start the flood from")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
         elif a["type"] == "draw_area":

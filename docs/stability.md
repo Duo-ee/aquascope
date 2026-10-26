@@ -136,6 +136,8 @@ benchmark:
   tool `mesh_lenses` and `aquascope mesh lenses`; `aquascope.groundwater.views` (contours, flow and capture zones, #623,
   #624); `aquascope.groundwater.layers` and `aquascope.groundwater.budget` (MODFLOW layers, sections and the water budget, #625, #626), with
   their flags of `aquascope modflow` and arguments of `modflow_heads`.
+- **Added in 1.1:** `aquascope.routing` (a flood wave down GEOGLOWS's river network, #656), `aquascope route` and
+  the MCP tools `route_flood` and `route_storm`.
 - **Added since 1.0.0:** `aquascope.paint` (Paint the globe, #657), `aquascope paint` and the MCP tool `paint_map`.
 
 Experimental means:
