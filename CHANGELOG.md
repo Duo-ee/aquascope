@@ -7,6 +7,9 @@ All notable changes to AquaScope are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Cite 1.0.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.0.0's Zenodo DOI (10.5281/zenodo.23671741).
+
 ## [1.0.0] - 2026-10-27
 
 AquaScope 1.0. The globe is where the work happens: click a river, a gauge or your own model
