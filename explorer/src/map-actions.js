@@ -1,7 +1,7 @@
 // AI on the map (#561): apply map actions, and the action log with one-click undo.
 //
 // An action is one of aquascope.map_commands' types (fly_to, set_time, set_layer, focus_status, set_basemap,
-// highlight_river, draw_area, add_pin, paint), checked by the package before it gets here and with its place names
+// highlight_river, draw_area, add_pin, route, paint), checked by the package before it gets here and with its place names
 // already looked up. Whoever wrote it (the keyless rules, the on-device model, the reader's own key, an
 // agent over WebMCP, or Explain and Scout through addPin), it is applied the way the reader's own click
 // would apply it, and listed in the log on the map with an undo for each and one for all.
@@ -300,6 +300,12 @@ function removePin(id) {
 
 // ── applying one action ─────────────────────────────────────────────────────
 
+// "From here" (#656): the reach the selection snapped to, else none (the action says to click a river first).
+function hereReach() {
+  const r = actions.selectedReach ? actions.selectedReach() : null;
+  return r && r.river_id !== null && r.river_id !== undefined ? { river_id: r.river_id, lat: r.lat, lon: r.lon } : null;
+}
+
 async function snapRiver(a) {
   const snap = await callLight("river", { op: "snap", args: { lat: a.lat, lon: a.lon, prefer: "main", max_distance_m: 5000 } },
     { priority: 2 });
@@ -394,6 +400,17 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       after = { ...reach, direction: a.direction || "both", label: a.label || "" };
       lightRiver(after);
       break;
+    }
+    case "route": {
+      // Route it (#656): route-map.js runs it, draws it and logs it with what it replaced; nothing to log here.
+      if (!actions.routeFlood) throw new Error("routing is not on this page");
+      const reach = a.at === "here" ? hereReach() : await snapRiver(a);
+      if (!reach) throw new Error("select a river first (click one), or name a place");
+      const args = { duration_h: a.duration_h || 24, shape: a.shape || "triangle",
+        ...(a.peak_cms ? { peak_cms: a.peak_cms } : { return_period: a.return_period || 10 }) };
+      if (actions.openRoute) actions.openRoute({ ...reach, name: a.label || a.where || "" });
+      await actions.routeFlood({ ...reach, name: a.label || a.where || "" }, args, { by, command, label });
+      return log.live().slice(-1)[0];
     }
     case "draw_area":
       after = { bbox: a.bbox, label: a.label || a.where || "" };
@@ -521,6 +538,7 @@ const ICON = {
   add_pin: '<path d="M12 21s7-7 7-12a7 7 0 0 0-14 0c0 5 7 12 7 12Z"/><circle cx="12" cy="9" r="2.2"/>',
   paint: '<path d="M19.5 3.5c-3.2 1.2-7.4 5.1-9.6 8.3l1.9 1.9c3.2-2.2 7.1-6.4 8.3-9.6Z"/><path d="M9.4 12.6c-1.9 0-3.3 1.4-3.5 3.3-.2 1.7-.9 2.6-2.4 3.1 3.4 1.4 7.3.3 7.7-3.2.1-1.2-.5-2.3-1.8-3.2Z"/>',
   what_if: '<path d="M4 17c3 0 3-3 6-3s3 3 6 3 2-2 4-2"/><path d="M9 4.5a3 3 0 1 1 3 3.5v1.6"/><path d="M12 11.6h.01"/>',
+  route: '<path d="M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/><path d="M6 9c1.5-3 3-4 4.5-4S13 7 14 9s2.5 3 4 2"/>',
 };
 
 const icon = (type) => `<svg class="ma-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +

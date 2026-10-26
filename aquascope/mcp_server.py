@@ -894,6 +894,44 @@ def whatif_map(river_id: int | None = None, lat: float | None = None, lon: float
     return res
 
 
+def route_flood(river_id: int | None = None, lat: float | None = None, lon: float | None = None,
+                peak_cms: float | None = None, return_period: float | None = None, duration_h: float = 24.0,
+                shape: str = "triangle", hours: int | None = None, places: bool = True) -> dict[str, Any]:
+    """Route it (#656): a flood wave entering at a river reach (river_id, or lat/lon to snap), routed down GEOGLOWS
+    v2's own network to the sea with Muskingum and GEOGLOWS's k and x per reach. The water entering is peak_cms
+    (m3/s) or the reach's return_period-year flow (GEV on its simulated record), shaped as a triangle (peaks at a
+    third of duration_h) or a block (a release, constant for duration_h hours). Returns per reach the added peak,
+    the hour of the peak, the wave's front and the attenuation, and (places) the Archive gauges on the path with
+    the wave where each stands. Muskingum is linear: these are the flows the wave adds to what the river carries.
+    Modelled, numbers from code; checked against GEOGLOWS's own hourly retrospective (the check is in the answer)."""
+    from aquascope.routing import route
+
+    res = route(river_id, lat=lat, lon=lon, peak_cms=peak_cms, return_period=return_period, duration_h=duration_h,
+                shape=shape, hours=hours, along=places, frames=False)
+    if isinstance(res.get("reaches"), list) and len(res["reaches"]) > 60:
+        rows = res["reaches"]
+        step = max(1, len(rows) // 50)
+        res["reaches"] = [r for j, r in enumerate(rows) if j % step == 0 or j == len(rows) - 1]
+        res["reaches_note"] = f"Every {step}th of {len(rows)} reaches; the CLI's --json has them all."
+    res.pop("geometry", None)
+    return res
+
+
+def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 6.0,
+                runoff_coefficient: float = 0.3, hours: int | None = None) -> dict[str, Any]:
+    """Route it (#656): a storm over polygon (a ring of [lon, lat]) of rain_mm over duration_h hours, a plain
+    runoff_coefficient (the share that runs off, no soil model) on every GEOGLOWS v2 reach whose unit catchment's
+    centre is inside, routed down every river below with Muskingum. Returns the biggest added peak, the outlets'
+    waves and the 500 reaches with the biggest peaks. Modelled, numbers from code."""
+    from aquascope.routing import route_storm as _storm
+
+    res = _storm(polygon, rain_mm=rain_mm, duration_h=duration_h, runoff_coefficient=runoff_coefficient,
+                 hours=hours, frames=False)
+    if isinstance(res.get("reaches"), list):
+        res["reaches"] = res["reaches"][:50]
+    return res
+
+
 def mesh_review(path: str, crs: str | None = None, offline: bool = False,
                 geometry: str | None = None) -> dict[str, Any]:
     """Review a model result on a mesh (#564): checks made by code on a HEC-RAS 2D plan HDF5 file or a UGRID
@@ -1684,6 +1722,8 @@ def build_server():
     server.tool()(mesh_review)
     server.tool()(mesh_lenses)
     server.tool()(whatif_map)
+    server.tool()(route_flood)
+    server.tool()(route_storm)
     server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)

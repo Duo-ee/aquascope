@@ -13,6 +13,8 @@ What is here and why (``docs/stability.md`` has the full policy):
   heads, SWMM). These modules changed in nearly every review of their first week.
 * The MODFLOW views added after 0.27.0 (#625, #626): ``aquascope.groundwater.layers`` (layers, cross-sections,
   a cell's heads over time) and ``aquascope.groundwater.budget`` (the cell-by-cell budget reader).
+* The map that computes (#664): ``aquascope.routing``, ``aquascope route`` and the MCP tools ``route_flood`` and
+  ``route_storm`` (#656), new in 1.1.
 * Paint the globe (#657, after 1.0.0): ``aquascope.paint``, ``aquascope paint`` and the MCP tool ``paint_map``.
 * ``aquascope.floodsim`` (#658): the Flood it spike, a local-inertial screening flood; its interface will change
   when the full feature lands.
@@ -58,6 +60,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.paint",
     "aquascope.river_path",
     "aquascope.rivers",
+    "aquascope.routing",
     "aquascope.watch",
     "aquascope.waterbalance",
     "aquascope.whatif_map",
@@ -84,6 +87,7 @@ CLI: tuple[str, ...] = (
     "now",
     "paint",
     "river",
+    "route",
     "swmm",
     "warnings",
     "watch",
@@ -126,6 +130,8 @@ MCP_TOOLS: tuple[str, ...] = (
     "reach_record",
     "river_status_month",
     "river_status_summary",
+    "route_flood",
+    "route_storm",
     "snap_to_river",
     "status_bulletin",
     "swmm_summary",

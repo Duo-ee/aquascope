@@ -29,6 +29,9 @@
   <link rel="stylesheet" href="./mesh.css?v=__BUILD__" />
   <link rel="stylesheet" href="./flood-views.css?v=__BUILD__" />
   <link rel="stylesheet" href="./whatif.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./route.css?v=__BUILD__" />
+        </div>
+      </section>
   <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
 </head>
 <body class="panel-collapsed">
@@ -324,6 +327,47 @@
           <div class="wi-foot">
             <label class="wi-check"><input id="wi-swipe-on" type="checkbox" /> Before/after swipe</label>
             <button id="wi-edit" type="button" class="link-btn wi-edit">Change the scenario</button>
+          </div>
+        </div>
+      </section>
+      <!-- route it (#656): a flood wave down GEOGLOWS's own river network, on the time bar; src/route-map.js -->
+      <section id="route" class="whatif route" aria-labelledby="rt-title" hidden>
+        <header class="wi-head">
+          <div>
+            <p class="wi-kicker">Route a flood</p>
+            <h2 id="rt-title" class="wi-title">River reach</h2>
+            <p class="wi-sub">Down GEOGLOWS's own network, reach by reach</p>
+          </div>
+          <button type="button" class="wi-close rt-close" aria-label="Close Route a flood" title="Close (Esc)">×</button>
+        </header>
+        <form id="rt-form" class="wi-form rt-form">
+          <fieldset class="rt-kind">
+            <legend class="visually-hidden">What enters the river</legend>
+            <label><input id="rt-kind-rp" type="radio" name="rt-kind" value="rp" checked /> The
+              <select id="rt-rp" aria-label="Return period, years">
+                <option value="2">2</option><option value="10" selected>10</option><option value="25">25</option>
+                <option value="100">100</option></select>-year flow here</label>
+            <label><input id="rt-kind-peak" type="radio" name="rt-kind" value="peak" />
+              <input id="rt-peak" type="number" min="1" step="any" inputmode="decimal" placeholder="500"
+                     aria-label="Peak flow, m³/s" /> m³/s</label>
+          </fieldset>
+          <label class="wi-slider"><span>Over</span>
+            <input id="rt-dur" type="range" min="3" max="120" step="3" value="24" />
+            <output id="rt-dur-out" for="rt-dur">24 h</output></label>
+          <label class="wi-check"><input id="rt-block" type="checkbox" /> A steady release, not a flood</label>
+          <div class="wi-run-row">
+            <span class="wi-scn">Muskingum, hourly</span>
+            <button id="rt-run" type="submit" class="btn small primary">Route</button>
+          </div>
+        </form>
+        <p id="rt-status" class="wi-status" role="status" hidden></p>
+        <div id="rt-result" class="wi-result" hidden>
+          <p id="rt-head" class="rt-head"></p>
+          <ol id="rt-places" class="rt-places"></ol>
+          <p id="rt-model" class="wi-model"></p>
+          <div class="wi-foot">
+            <button id="rt-replay" type="button" class="link-btn">Play the wave again</button>
+            <button id="rt-edit" type="button" class="link-btn wi-edit">Change the flood</button>
           </div>
         </div>
       </section>

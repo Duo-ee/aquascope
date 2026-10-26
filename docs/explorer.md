@@ -430,6 +430,109 @@ a gauge, `--rain`, `--warming`, `--demand`, `--rp`, `--llm` with your own key,
 seeded calibration gives −38.3% mean flow, −38.5% low flow and −46.0% 10-year flood
 for the Thur in both.
 
+## Route a flood
+
+A flood wave travels down the river on the globe, reach by reach, and every town and gauge
+downstream gets the hour it arrives and how big it is. On a river reach's map card (or a
+gauge's, once its river is found), **Route a flood** opens a small panel: what enters the
+river (the reach's 2-, 10-, 25- or 100-year flow, or a number in m³/s), over how many hours,
+and whether it is a flood (a triangle that peaks at a third of the time) or a steady release.
+
+![Route a flood on a river's map card](img/globe/route-card.png)
+
+**Route** runs Muskingum routing down GEOGLOWS v2's own river network in the worker
+(`aquascope.routing.route`):
+
+- **The network and the parameters are GEOGLOWS's own.** Each processing unit's routing
+  configuration is public on S3 with `Access-Control-Allow-Origin: *`
+  (`routing-configs/vpu=<n>/`): `rapid_connect.csv` (each reach and the reach it drains to),
+  `k.csv` (each reach's travel time, in seconds) and `x.csv` (its weight: 0.36 for every reach
+  of the four units checked, 205, 209, 714 and 718), row for row in the same order, which is
+  upstream first. The unit's `routing_parameters.parquet` holds the same k and x (checked for
+  unit 718); the CSVs are read so the browser needs no Parquet reader.
+- **The step is GEOGLOWS's own hour.** A Muskingum coefficient goes negative when the step is
+  outside `2kx` to `2k(1 - x)`, so, as river-route (the GEOGLOWS team's router,
+  github.com/geoglows/river-route) does, a reach
+  too short for the hour takes sub-steps of its own with its inflow interpolated across them,
+  and a reach too long for it is split into sub-reaches in series: the fewest that keep every
+  coefficient at zero or above (`routing.plan`). The sub-steps fold into one set of
+  coefficients per reach, and each reach's whole series is one first-order filter: the 323
+  reaches from St. Louis down the Mississippi route 30 days in about 1.4 s on a laptop.
+- **What is routed is the water you add.** Muskingum is linear, so the wave routes on its own:
+  the numbers are the flow it adds to whatever the river already carries. Rivers that join
+  below add their own water on top, and a real flood that leaves the channel travels slower
+  and flattens more than one k and x per reach can say.
+
+![The wave on the Rhine 44 hours after 2,000 m³/s enters at Basel](img/globe/route-wave.png)
+
+The map shows the answer while you watch. The time bar takes the run's own clock (hours since
+the water started to enter) and plays it once: each reach is coloured and widened by how much
+of the peak that entered is there at that hour, pale blue for a little, deep purple near full
+strength, over a faint trail of each reach's own peak. **Back to dates** leaves the still
+picture: every reach at its own peak, which shows how the wave flattens on its way.
+
+![Every reach at its own peak: the wave flattens from Basel to Rotterdam](img/globe/route-peaks.png)
+
+The towns (read off the basemap's own labels, OpenMapTiles) and the Archive's gauges on the
+path are placed on it by the package (`routing.places_on_path`) and labelled with the hour of
+the peak and the added flow there; the panel lists a few, spread along the stretch the wave
+reached, with how much flatter the peak is than where it started. A click on a town, a gauge
+or a reach opens its card: the wave's front (the hour the added flow first reaches half its
+own peak there), its peak and the attenuation, with **Route a flood from here**.
+
+![A town's card: when the wave arrives at Rotterdam](img/globe/route-place-card.png)
+
+### The check against GEOGLOWS's own simulation
+
+The routing was checked against the model it borrows from: GEOGLOWS's hourly retrospective
+simulation (`retrospective/hourly.zarr`). `aquascope route check UPSTREAM DOWNSTREAM START END`
+(`routing.retro_check`, which needs `numcodecs`) routes the retrospective flow leaving an
+upstream reach, with every tributary that drains at least 1 % of the area at the downstream
+reach read from the retrospective too, down to the downstream reach, and compares the result
+with the retrospective there, hour by hour. The smaller tributaries and the path's own unit
+catchments get their area times the specific runoff of the flows read, an estimate that does
+not look at the answer. Ten days of spin-up are not scored. "No routing" adds the same inflows
+with no travel time: the baseline routing has to beat.
+
+| River, window | Reaches | Sum of k | NSE | Peak | Peak timing | NSE, no routing |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Elbe, Dresden to Magdeburg, 25 May to 4 July 2013 | 89 | 106.7 h | 0.982 | +2.8 % | 0 h | 0.43 |
+| Rhine, Basel to Cologne, 20 Dec 2017 to 9 Feb 2018 | 166 | 203.4 h | 0.986 | +2.4 % | −4 h | 0.73 |
+| Danube, Passau to Vienna, 25 May to 4 July 2013 | 102 | 124.5 h | 0.966 | +5.9 % | −5 h | −0.31 |
+| Mississippi, St. Louis to Memphis, 15 Apr to 14 July 2019 | 153 | 239.4 h | 0.894 | −0.9 % | +4 h | −0.18 |
+
+The stated tolerance is an NSE of at least 0.85, the largest peak within 10 % and its timing
+within 12 hours; all four meet it, and `aquascope.routing.CHECK` holds the numbers (run on
+2026-10-27). Part of what is left over is the estimated local runoff, 3 to 15 % of the area.
+The check is against the model, not against gauges: the travel times are GEOGLOWS's k, which
+carry a wave from Basel to Rotterdam in about 14 days.
+
+### From words, a CLI and an agent
+
+**Ask the map** reads a route without a model: "route a flood of 500 m3/s from Basel",
+"release 800 m3/s for 2 days from here" (the river you clicked), "route the 100-year flood down
+the Rhine from Basel", "send a flood down the Rhine". The action is `route` in
+`aquascope.map_commands` (a place, a point or `at: here`; `peak_cms` or `return_period`, the
+10-year flow when neither is said; `duration_h`; `shape` triangle or block), checked before it
+runs; a model may pick it, and the package computes it. Every run is in the action log with its
+undo.
+
+![A release from the river selected, read by the keyless rules and logged](img/globe/route-ask.png)
+
+On a phone the panel is a sheet; after a run it moves to the top and keeps to the answer, so
+the wave and the time bar show below it.
+
+![Route a flood on a phone](img/globe/route-phone.png)
+
+The same engine answers outside the page: `aquascope route flood 230301988 --peak 2000`
+(or `--at LAT LON`, `--rp 100`, `--duration`, `--shape block`, `--hours`, `--json`) prints the
+wave and the gauges on the way; `aquascope route storm --polygon '[[lon,lat],...]' --rain 80`
+turns a storm over a polygon into runoff (a plain runoff coefficient, `--runoff`, 0.3 by
+default: no soil, wetness or snow) on every reach whose catchment centre is inside and routes
+it down every river below; the MCP tools `route_flood` and `route_storm` return the same as
+JSON. In the browser a 2,000 m³/s flood from Basel routes in about 20 s, engine start and the
+trace included, measured in headless Chrome.
+
 ## Paint this view
 
 The brush in the map tools paints one question at every gauge in view that the
