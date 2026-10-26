@@ -392,6 +392,19 @@ function clearByUndo() {
     label: "Clear the painting", by: "rules" });
 }
 
+// A restarted worker has lost the painting it held: hand it the rows back, so the downloads still work.
+async function resync() {
+  const my = runId, spec = shown.spec;
+  try {
+    const rows = shown.order.map((k) => shown.rows.get(k)).filter(Boolean);
+    const params = { min_years: spec.min_years, alpha_global: ALPHA_GLOBAL, ...(spec.start_year ? { start_year: spec.start_year } : {}) };
+    await callCancelable("paint", { op: "start", question: spec.question, params, bbox: spec.bbox, rows }).promise;
+    if (my === runId) await callCancelable("paint", { op: "summary" }).promise;
+  } catch (err) {
+    console.info("paint: could not hand the painting back to the worker:", err && err.message);
+  }
+}
+
 // ── the panel: the picker, the progress and the verdict ─────────────────────
 
 function showPanel(on) {
@@ -673,7 +686,10 @@ export function initPaint() {
   $("pt-stop").addEventListener("click", stopPainting);
   $("pt-more").addEventListener("click", () => void paintMore());
   $("pt-change").addEventListener("click", () => { p.classList.add("editing"); renderPanel(); });
-  onWorkerRestart(() => { if (shown && shown.phase !== "done") stopPainting(); });
+  onWorkerRestart(() => {
+    if (shown && shown.phase !== "done") stopPainting();
+    else if (shown) void resync();
+  });
   // The AI action paint (map-actions.js) and agents reach it here.
   actions.paintMap = (spec, opts) => paintView(spec, opts);
   actions.paintState = () => (shown ? { ...shown.spec } : null);
