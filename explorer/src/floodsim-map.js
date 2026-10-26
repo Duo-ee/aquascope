@@ -160,7 +160,8 @@ export async function floodIt(t, { rp = 100, by = "rules" } = {}) {
     const win = windowTiles(t.lon, t.lat, ZOOM, SIZE);
     const z = await readTerrain(win);
     const lines = riverLines(t);
-    const gpu = gpuAvailable();
+    // navigator.gpu can be there with no adapter behind it (headless, blocklisted GPUs): ask for one.
+    const gpu = gpuAvailable() && Boolean(await navigator.gpu.requestAdapter().catch(() => null));
     // Without WebGPU the worker runs a grid of half the size: the terrain averaged 2 x 2, the rivers burnt again.
     const cwin = gpu ? win : { ...win, size: SIZE / 2, zoom: ZOOM - 1, x0: win.x0 / 2, y0: win.y0 / 2, dx: win.dx * 2 };
     const zz = gpu ? z : coarsen(z, SIZE);
@@ -185,6 +186,10 @@ export async function floodIt(t, { rp = 100, by = "rules" } = {}) {
       max: summary(res.hMax, cwin.dx) };
     const before = slotValue("floodsim");
     show(value);
+    if (state.mapOk) {   // the whole run in view, the card's anchor still on the reach
+      const [w, s, e, n] = win.bounds;
+      map.fitBounds([[w, s], [e, n]], { padding: 40, duration: 600 });
+    }
     logAction({ action: { type: "flood_reach", river_id: t.river_id, return_period: rp, flow_cms: q }, before,
       after: value, label: `Flood it: ${rp}-year flow`, by, detail: `${fmt(q)} m³/s for ${HOURS} h` });
     announce(`Flood it: ${fmt(value.max.wet_km2, 1)} square kilometres wet after ${HOURS} hours`);
@@ -214,8 +219,16 @@ function draw(v, i) {
     return;
   }
   map.addSource(SRC, { type: "image", url, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
+  // Under the rivers and the gauges, as the other depth rasters: at the top of the stack on the globe, an image
+  // source darkened the whole map in Chrome 155.
   map.addLayer({ id: SRC, type: "raster", source: SRC,
-    paint: { "raster-opacity": 0.92, "raster-fade-duration": 0, "raster-resampling": "nearest" } });
+    paint: { "raster-opacity": 0.92, "raster-fade-duration": 0, "raster-resampling": "linear" } }, beforeId());
+}
+
+function beforeId() {
+  const layers = (map.getStyle() && map.getStyle().layers) || [];
+  const hit = layers.find((l) => /^river-/.test(l.id) || ["catchment-fill", "gauge-heat", "clusters", "points"].includes(l.id));
+  return hit ? hit.id : undefined;
 }
 
 function clearMap() {

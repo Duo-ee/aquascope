@@ -430,6 +430,16 @@ a gauge, `--rain`, `--warming`, `--demand`, `--rp`, `--llm` with your own key,
 seeded calibration gives −38.3% mean flow, −38.5% low flow and −46.0% 10-year flood
 for the Thur in both.
 
+## Flood it (spike)
+
+On a river reach's map card, **Flood it** pours the reach's 100-year flow (or the 2- or 10-year) into it for six
+hours and the water spreads over the terrain on your own GPU (WebGPU; a worker on a coarser grid without it). The
+depth is drawn on the map and the time bar steps through the run. A screening flood: no bathymetry, terrain errors
+of metres. The scheme, its checks against still water, Manning and Ritter's dam break, the comparison with the
+JRC 100-year depth and the speed are in [Flood it](floodsim.md).
+
+![Flood it on the Severn](img/floodsim/flood-it-card.png)
+
 ## Map layers
 
 The rail is a layer stack, and every layer in it is keyless and free to use.
