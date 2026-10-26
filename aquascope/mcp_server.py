@@ -349,6 +349,41 @@ def study_area(
         return {"error": str(exc)}
 
 
+def paint_map(
+    bbox: list[float],
+    question: str = "flood_trend",
+    min_years: int = 20,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    max_gauges: int = 100,
+) -> dict[str, Any]:
+    """Paint one question over every gauge the AquaScope Archive mirrors in bbox [west, south, east, north] (#657).
+    question: flood_trend (Mann-Kendall and Sen's slope of the annual maximum daily flow over complete
+    hydrological years, in % of the mean per decade), low_flow_trend (the same for the annual minimum 7-day mean
+    flow) or baseflow_index (Lyne-Hollick, from signatures.parquet). Trend questions add field significance: the
+    Benjamini-Hochberg false discovery rate at twice the global level (Wilks 2016), with the verdict and its
+    caveat. Gauges the Archive does not mirror, too short or past max_gauges (longest records first) are listed
+    with why. Returns the headline, field test, counts, per-gauge rows, licences and a methods paragraph with
+    references. Report the verdict and the coverage; do not claim a regional trend the field test rejects."""
+    from aquascope import paint as _paint
+
+    if not bbox or len(bbox) != 4:
+        return {"error": "give bbox [west, south, east, north]"}
+    params: dict[str, Any] = {"min_years": int(min_years)}
+    if start_year:
+        params["start_year"] = int(start_year)
+    if end_year:
+        params["end_year"] = int(end_year)
+    try:
+        res = _paint.paint(question, bbox=[float(x) for x in bbox], params=params,
+                           max_gauges=max(1, min(int(max_gauges), _paint.MAX_GAUGES)))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    res.pop("geojson", None)
+    res.pop("table", None)
+    return res
+
+
 def snap_to_river(lat: float, lon: float, max_distance_m: float = 1000.0, prefer: str = "main",
                   area_km2: float | None = None) -> dict[str, Any]:
     """Snap a point to its GEOGLOWS v2 river reach (about 6.8 million worldwide): its river_id, Strahler order and
@@ -1649,6 +1684,7 @@ def build_server():
     server.tool()(mesh_review)
     server.tool()(mesh_lenses)
     server.tool()(whatif_map)
+    server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)
     server.tool()(analyse_table)

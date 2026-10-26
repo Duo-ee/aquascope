@@ -29,6 +29,7 @@
   <link rel="stylesheet" href="./mesh.css?v=__BUILD__" />
   <link rel="stylesheet" href="./flood-views.css?v=__BUILD__" />
   <link rel="stylesheet" href="./whatif.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
 </head>
 <body class="panel-collapsed">
   <a class="skip" href="#panel">Skip to the results panel</a>
@@ -199,6 +200,13 @@
             <circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><ellipse cx="12" cy="12" rx="4.2" ry="9" />
           </svg>
         </button>
+        <button id="btn-paint" class="map-tool" type="button" aria-expanded="false" aria-controls="paint"
+                title="Paint this view: one question at every gauge in view" aria-label="Paint this view">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19.5 3.5c-3.2 1.2-7.4 5.1-9.6 8.3l1.9 1.9c3.2-2.2 7.1-6.4 8.3-9.6Z" />
+            <path d="M9.4 12.6c-1.9 0-3.3 1.4-3.5 3.3-.2 1.7-.9 2.6-2.4 3.1 3.4 1.4 7.3.3 7.7-3.2.1-1.2-.5-2.3-1.8-3.2Z" />
+          </svg>
+        </button>
         <button id="btn-time" class="map-tool" type="button" aria-pressed="false" aria-controls="timebar" hidden
                 title="Map date" aria-label="Map date">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
@@ -317,6 +325,35 @@
             <label class="wi-check"><input id="wi-swipe-on" type="checkbox" /> Before/after swipe</label>
             <button id="wi-edit" type="button" class="link-btn wi-edit">Change the scenario</button>
           </div>
+        </div>
+      </section>
+      <!-- Paint the globe (#657): one question at every gauge in view; src/paint.js and paint.css -->
+      <section id="paint" class="paint" aria-labelledby="pt-title" hidden>
+        <header class="pt-head">
+          <div>
+            <p class="pt-kicker">Paint this view</p>
+            <h2 id="pt-title" class="pt-title">One question, every gauge in view</h2>
+          </div>
+          <button type="button" class="pt-close" aria-label="Close Paint this view" title="Close (Esc)">×</button>
+        </header>
+        <form id="pt-form" class="pt-form">
+          <fieldset class="pt-qs-wrap"><legend class="pt-label">Question</legend><div id="pt-qs" class="pt-qs"></div></fieldset>
+          <div class="pt-row">
+            <label>At least <select id="pt-years" aria-label="Complete years a gauge needs"></select> years</label>
+            <label><select id="pt-period" aria-label="Which years"></select></label>
+          </div>
+          <div class="pt-run-row">
+            <span class="pt-note">Archive gauges only; up to 300 a view, the longest records first.</span>
+            <button id="pt-run" type="submit" class="btn small primary">Paint this view</button>
+          </div>
+        </form>
+        <div id="pt-bar" class="pt-bar" hidden><span></span></div>
+        <p id="pt-status" class="pt-status" role="status" hidden></p>
+        <button id="pt-stop" type="button" class="link-btn pt-stop" hidden>Stop</button>
+        <div id="pt-result" class="pt-result" hidden>
+          <p id="pt-verdict" class="pt-verdict" hidden></p>
+          <p id="pt-headline" class="pt-headline"></p>
+          <p class="pt-hint">The key, the counts and the downloads are in the legend (Painted). Click a dot for its gauge.</p>
         </div>
       </section>
       <!-- talk to the map (#561): one line on the map and the action log under it; src/map-command.js and src/map-actions.js -->
