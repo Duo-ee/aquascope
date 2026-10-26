@@ -158,7 +158,11 @@ Who reads the words, in order, and the line under the box says which one did:
 
 Whatever answers, the actions are checked by the package before they run (a model's
 reply that names an unknown layer or a future date is refused, and the line says
-so), and place names are looked up in the same gazetteer as the search (Photon by
+so). A model picks and the package writes (#590): the place it may name is a run
+of your own words, the layers it may switch are the ones your words ask for
+("running low" asks for the river status, "flood" for a flood layer), and a pin's
+title is the place, never the model's words. A place, a box or a layer your words
+do not hold is refused, and the line says which. Place names are looked up in the same gazetteer as the search (Photon by
 komoot, OpenStreetMap data, ODbL); a name it does not hold is tried as a gauge in
 the catalogue. A river is lit from the point the gazetteer gives for it ("the Nile"
 starts at Lake Nasser), so "what drains to the Nile at Khartoum" or a click picks a
@@ -223,17 +227,32 @@ the globe at the newest month, Scout uses that file, and the line under the bar 
 scans the view in your browser, in a few seconds once the engine has started.
 
 **With a model.** Keyless, the rules' own sentences are used. With Chrome's built-in
-model ready, or a key in Ask ✨, the model puts the findings in order and words them,
-choosing from a few more than ten. It never writes a number: every number, date,
-place and ranking is a slot (`{area}`, `{peak}`, `{month}`) that the package fills in,
-and wording with a digit, a percent sign, a number word or a word like "record" or
-"largest" outside the slots is refused, and so is a sign set against a slot ("-{peak}",
-"minus {area}"), so the rules' wording stays. A wording must also keep what its finding says (`CLAIMS`): "much
-below normal" stays below, and "the models miss this river" is not turned into "questions about the gauge's
-measurement". The line says who worded the pins (the rules, when no wording of the model's was used) and gives the
-first refusal's reason. A slot's exact value written
-out ("September 2026" for `{month}`) counts as that slot, so a correct wording is not refused for it. The findings
-the model leaves out, or whose ids it mangles, follow in the rules' order, so none is dropped. The maintainer's keys are never used for visitors.
+model ready, or a key in Ask ✨, the model picks and the code writes (#590): the model
+decides the order of the findings, choosing from a few more than ten, and for each one
+which of three fixed wordings (variants `a`, `b`, `c`) the package shows. Its reply is a
+JSON object held to a schema whose values are enums: the finding ids on screen and the
+variant ids (`map_scout.wording_schema`, passed to Chrome as `responseConstraint`). It
+writes no title and no reason, so no number, date, place, severity or likelihood of its
+own can reach a pin. A reply outside the schema is refused whole
+(`aquascope.map_pick.pick`), the line says so in one short sentence, and the rules'
+order and wording stay. The findings the model leaves out follow in the rules' order, so
+none is dropped. If the model is asked and does not answer (it timed out after 40 s), the
+line says it was asked and timed out, not "no model".
+
+Severity and likelihood words come only from the facts, by fixed thresholds:
+
+| Word | When |
+|---|---|
+| "severe flow forecast" | the reach is forecast at its 50-year flow or more |
+| "high flow forecast" | at its 10-year or 25-year flow |
+| (none) | at its 2-year or 5-year flow |
+| "every ensemble member reaches" | all 51 GEOGLOWS members reach the 2-year flow |
+| "a high chance of passing" | at least three quarters of the 51 members (39 or more) |
+| "a substantial chance of passing" | at least two fifths (21 to 38 members) |
+| "a small chance of passing" | fewer than 21 members |
+
+These are `SEVERITY_FROM_RP` and `CHANCE_FROM_SHARE` in `aquascope.map_scout`. The maintainer's keys are never
+used for visitors.
 
 The same scan is `aquascope layers scout [--bbox W S E N] [--month YYYY-MM]
 [--published]`, the MCP tool `map_scout`, and, for an assistant in the browser, the
@@ -275,26 +294,25 @@ or a gauge. The cards take whichever side keeps them clear of each other.
 
 ![Explain on the globe](img/globe/explain-globe.png)
 
-Who words the notes:
+Who chooses the notes:
 
-1. **No model, no key**: fixed wording from the same facts (`template_notes`). This
-   always works.
+1. **No model, no key**: the package's notes in their first wording (`template_notes`).
+   This always works.
 2. **The model on your device** or **your own key** from Ask ✨, in the same order as
-   Ask the map. The model only chooses and orders the facts and writes the words
-   between them. It writes each number as a placeholder (`{f3}`), which code fills in
-   from the facts, and a note whose words hold any other number, in digits or in words
-   ("twelve", "half"), or with a sign or a digit set against a placeholder ("-{f3}", "minus {f3}",
-   "{f3}0", which would change the number code puts in), is refused (the claim lock, the same check
-   Scout and the mesh review make); the line under the box says how many were refused and why. A note whose
-   numbers are all in its facts can still claim more than they say: "96% of the land is significantly below
-   normal" when the 96% is of land below *or* much below normal is refused, and so is a side of normal its
-   facts are not on. A share of the mapped land is written as a share ("{f4} of the mapped land"): written
-   bare, as in "the river is mapped at 21% above normal" or "flow at least 81% below normal", it reads as a
-   change in flow that no fact holds, and the note is refused. A value the model writes again after its
-   placeholder ("54% (54%)", "km² km²", "on on Sat 7 Nov") is written once, and a sentence that only copies
-   the prompt is dropped. When fewer than
-   three pass, notes in fixed wording on the other facts make up the rest. When none passes, the line
-   says the model's wording was refused, with the reasons, not that no model was asked.
+   Ask the map. The model picks and the code writes (#590): the model decides which of
+   the package's notes to show, in which order, and which of each note's three fixed
+   wordings (variants `a`, `b`, `c`) reads best. Its reply is a JSON object held to a schema
+   whose values are enums, the note ids (`n1`, `n2`...) and the variant ids
+   (`map_explain.notes_schema`, passed to Chrome as `responseConstraint`). It writes no word
+   of a note: every value, date, place, comparison and claim is written by the package
+   from the facts. A share of the whole view is said as "N% of the mapped land in view is
+   below or much below normal"; the largest single area as that area's share ("the
+   largest area much below normal in view covers 14% of the mapped land in view"), never as
+   the share of all land; and where a note compares two areas ("more than", "less than"),
+   the package compares their values. A reply outside the schema is refused whole
+   (`aquascope.map_pick.pick`), the line under the box says so in one short sentence, and
+   the fixed wording stays. When the model picks fewer than three, notes in fixed wording
+   on the other facts make up the rest.
 
 A layer still reading its file (just after the page opens, or after a new date) is
 waited for before the view is read. A click on a note opens it in the map card, with every fact it cites and the full
@@ -376,15 +394,22 @@ Who reads the line, in the same order as Ask the map:
    line says what the rules read and which words they could not, puts the part read on
    the sliders, and does not run.
 2. **The model on your device**, then **your own key** from Ask ✨. The model only
-   fills the four parameters (rain %, warming, evaporation %, demand). A number it
-   gives that is not in your words, one your words say once but it uses twice, one
-   going the other way from your words ("20% more rain" is never -20), or one outside
-   the limits is refused (the claim lock), and the line under the box says who read it. The values go into the sliders before the run, so you see
-   exactly what runs. When a model's reading is refused, the line says which model and why,
-   and suggests only a way not yet tried. The model changes the whole year, so a line that names
-   a part of it ("summers get much hotter, maybe three degrees") runs as a year-round change and
-   the line says the season was not applied. A small value keeps its figures: 20 litres a second
-   reads "0.02 m³/s taken", never "0 m³/s".
+   parses (#590): for each clause it names a change (`less_rain`, `warmer`, `take_water`...),
+   the number exactly as your words write it ("7.5", "twenty", "one and a half", "a fifth"),
+   the unit your words give it (`percent`, `fraction`, `degC`, `K`, `degF`, `m3/s`, `l/s`,
+   `m3/day`, `ML/day`, `mm`) and the part of the year, all enums
+   (`whatif_map.scenario_schema`; the numbers it may name are your words' own number tokens).
+   The package does the rest: it takes the number from your words, checks the unit against
+   the one your words give it, converts it ("a brewery draws 7.5 l/s" runs as 0.0075 m³/s
+   taken, never 7.5 m³/s), sets the sign from the change, refuses a direction your words
+   say the other way ("20% more rain" is never -20) and holds the value to the limits. A
+   change in mm of rain cannot be run (the model takes rain as a percent) and is said. The
+   values go into the sliders before the run, so you see exactly what runs. When a model's
+   reading is refused, the line says which model and why, and suggests only a way not yet
+   tried. The model changes the whole year, so a line that names a part of it ("summers get
+   much hotter, maybe three degrees") runs as a year-round change and the line says the
+   season was not applied. A small value keeps its figures: 20 litres a second reads "0.02
+   m³/s taken", never "0 m³/s".
 
 Every run is in the action log with its undo; a new run replaces the painting and undo
 puts the one before back. A second scenario on the same basin reuses the calibration
@@ -1280,7 +1305,8 @@ by radar and in the news, and the modelled peak against the Archive's gauges ins
 mesh. The findings drop as numbered pins (red a problem, amber worth a look, slate for
 information), flag the cells they are about, and go in the action log with an undo each;
 the legend row lists the nine checks and what each found. A model, on the device or with
-your key, may only order and word them, held to the numbers by the claim lock
+your key, only picks which findings to pin, in what order, and one of three fixed wordings
+of each; the words, numbers and counts are the package's
 ([mesh.md](mesh.md#review-my-model-results)).
 
 **Draw a section** (#621) on the legend row: drag a line across the flood, or tap its two ends,
@@ -1396,10 +1422,36 @@ and shows the fresh numbers beside the recorded ones. The traces are produced by
 **On your device.** If your browser has Chrome's built-in Prompt API, Ask uses
 it directly. Otherwise you can choose to download a small open model (about 2 GB,
 WebLLM over WebGPU, cached by the browser after the first time). Neither is
-reliable at native tool calling at that size, so this tier uses a smaller loop:
-the model picks one tool at a time from five by replying with JSON, and after a
-few steps it writes the answer. It is labelled "on your device, reduced tool
-set" rather than presented as the full Analyst.
+reliable at native tool calling at that size, so this tier uses a smaller loop,
+and the model in it writes nothing you read (#590). Each step it replies with
+JSON held to a schema of choices the package builds from your question
+(`aquascope.ai_engine.device_ask`, internal):
+
+- **It decides** which tool to run next (find_stations, analyze_station,
+  anywhere, describe_catchment), with a gauge id, a point or a search phrase that
+  your words, the context line or an earlier result hold; then which facts
+  answer the question, and in what order, by key (`USGS-01646500.trend.mean`,
+  `USGS-01646500.gev.100`, ...), with a few connecting sentences by id.
+- **It cannot** write a number, a date, an id, a unit, a place or a claim. Every
+  sentence is AquaScope's, written from the tool results: it names the gauge,
+  the label, the value with its unit and the method (GEV or LP3, Mann-Kendall),
+  and a trend is the package's reading of the test. A call with an id or a
+  point your words and the results do not hold is not run, nor is a call
+  already made; the last step may only answer. A reply outside the choices is
+  refused, and the page shows the facts the tools returned, under one line
+  saying why.
+- **The schema is closed.** A call's arguments are only those its tools take,
+  each a choice: a gauge id, a source, a search phrase (a name from your words,
+  never an opening verb or the letters of an id), and a latitude, longitude or
+  search point only from the points your words or the results give (none when
+  there are none), never a free number.
+- **Each step has a time limit** of 25 s, and **Stop** ends the question at once.
+  Either way the page shows the facts gathered so far, under one line saying
+  why. When every call the model made was refused, that line says so and why.
+
+It is labelled "on your device, reduced tool set" rather than presented as the
+full Analyst. Your own key runs the full Analyst, which writes its own prose and
+is checked by its own verifier: this design does not apply to it.
 
 **Your own key**, as described above, for the full tool loop.
 

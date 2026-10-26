@@ -1,6 +1,8 @@
 // What if, on the map (#565). From the map card, "What if…" opens a small panel on the map: two sliders and a
 // demand (keyless), and one line read into those values by the keyless rules, the on-device model or the
-// reader's own key (the model only fills the parameters; aquascope.whatif_map checks them against the words).
+// reader's own key. A model only parses (#590): per clause a change kind, the number as the words write it, a
+// unit and a season, all enums (aquascope.whatif_map.scenario_schema, Chrome's responseConstraint); the package
+// takes each number from the words, converts its unit and sets the sign.
 // Run calibrates GR4J for the basin in the worker (aquascope.whatif_map.whatif, the same function as
 // `aquascope whatif` and the MCP tool) and the answer is painted on the rivers: the basin in its change, the
 // river below it to the next major confluences fading as other rivers join, a label with the change where it

@@ -1002,32 +1002,40 @@ json.dumps(_out, default=str)
   post("result", { id, result: JSON.parse(out) });
 }
 
-// ── On-device Ask (#590): aquascope.ai_engine.device_ask. op "tool" runs one tool as runTool does and returns
-// only its compact result (what the small model is shown); op "lock" holds the model's answer to this
-// question's compact results.
-async function deviceAsk({ id, op, name, arguments: args, answer, results, words }) {
-  self.__aqDev = JSON.stringify({ op: String(op || ""), name: String(name || ""), args: args || {},
-    answer: String(answer || ""), results: results || [], words: String(words || "") });
+// ── On-device Ask (#590): aquascope.ai_engine.device_ask. The model picks, the package writes (round 3).
+// op "plan" is a step's reply schema and message (step_schema: enums built from this question); op "tool" checks
+// the model's call (check_call: an id, point or search phrase the words or results hold, no repeat) and runs it,
+// returning only the compact result; op "render" writes the answer from the fact keys the model picked
+// (render_answer). op "lock" holds free text to the results (lock_answer), kept as the second line of defence.
+async function deviceAsk({ id, op, reply, results, words, step, budget, force, notes, why, answer }) {
+  self.__aqDev = JSON.stringify({ op: String(op || ""), reply: reply === undefined ? null : reply,
+    results: results || [], words: String(words || ""), step: Number(step) || 1,
+    budget: Number(budget) || null, force: Boolean(force), notes: Array.isArray(notes) ? notes.map(String) : [],
+    why: why ? String(why) : null, answer: String(answer || "") });
   const code = `
 import json
 from js import __aqDev
 from aquascope.ai_engine import analyst as _analyst
 from aquascope.ai_engine import device_ask as _dev
 _a = json.loads(__aqDev)
-if _a["op"] == "tool":
-    _spec = {s.name: s for s in _analyst._tool_specs()}.get(_a["name"])
-    if _spec is None:
-        _payload = {"error": f"unknown tool {_a['name']}"}
-    else:
+if _a["op"] == "plan":
+    _out = _dev.step_schema(_a["results"], _a["words"], step=_a.get("step") or 1, budget=_a.get("budget"),
+                            force_answer=bool(_a.get("force")), notes=_a.get("notes") or [])
+elif _a["op"] == "tool":
+    _out = _dev.check_call(_a.get("reply"), _a["results"], _a["words"])
+    if _out.get("ok"):
+        _spec = {s.name: s for s in _analyst._tool_specs()}.get(_out["name"])
         try:
-            _payload = _spec.func(**(_a.get("args") or {}))
+            _payload = _spec.func(**_out["arguments"]) if _spec else {"error": f"unknown tool {_out['name']}"}
         except Exception as exc:
             _payload = {"error": f"{type(exc).__name__}: {exc}"}
-    _payload = json.loads(json.dumps(_payload, default=str))
-    _ok = not (isinstance(_payload, dict) and _payload.get("error"))
-    _out = {"ok": _ok, "compact": _dev.compact_result(_a["name"], _payload)}
+        _payload = json.loads(json.dumps(_payload, default=str))
+        _out["ok"] = not (isinstance(_payload, dict) and _payload.get("error"))
+        _out["compact"] = _dev.compact_result(_out["name"], _payload)
+elif _a["op"] == "render":
+    _out = _dev.render_answer(_a.get("reply"), _a["results"], _a["words"], why=_a.get("why"))
 elif _a["op"] == "lock":
-    _out = _dev.lock_answer(_a["answer"], _a["results"], _a["words"])
+    _out = _dev.lock_answer(_a.get("answer") or "", _a["results"], _a["words"])
 else:
     _out = {"error": "unknown op"}
 json.dumps(_out, default=str)
@@ -1154,7 +1162,8 @@ json.dumps(_out, default=str)
 }
 
 // ── Talk to the map (#561): aquascope.map_commands, the same functions as `aquascope map` and the MCP tool.
-// op "parse" reads a request with the keyless grammar; "prompt" is the system prompt and schema for a model;
+// op "parse" reads a request with the keyless grammar; "prompt" is the system prompt and schema for a model
+// (with "text", the schema for that request: the places and layers its words name, and no free text);
 // "reply" checks a model's reply; "validate" checks actions from anywhere (an agent over WebMCP); "resolve"
 // looks place names up in the gazetteer (Photon); "llm" asks the reader's own model with their key (the main
 // worker only: the provider client lives beside the Analyst).
@@ -1174,6 +1183,9 @@ try:
         _out = _mc.parse_command(_a["text"], today=_a["today"])
     elif _a["op"] == "prompt":
         _out = _mc.model_prompt(_a["context"], today=_a["today"])
+        if _a["text"]:
+            # The device's schema for this request: places and layers its words name, no free text (#590).
+            _out["schema"] = _mc.reply_schema(_a["text"])
     elif _a["op"] == "reply":
         _out = _mc.parse_model_reply(_a["reply"], today=_a["today"], text=_a["text"] or None)
     elif _a["op"] == "validate":
@@ -1247,7 +1259,8 @@ json.dumps(_out, default=str)
 // whatif_map. Type "whatif" (the main worker: GR4J needs scipy and pandas): op "run" calibrates the basin's model
 // and carries the scenario downstream; op "llm" reads the reader's line with their own key. Type "whatif_words"
 // (a light worker can): op "parse" is the keyless rules, "prompt" the system prompt and schema for the on-device
-// model, "read" both in one call, "reply" checks a model's reply against the reader's words (the claim lock).
+// model, "read" both in one call, "reply" reads a model's parse against the reader's words (the code takes each
+// number from the words and converts its unit, #590).
 // Op "basin" (the main worker: the routing tables need pandas) says whether the reach's basin is within the size
 // a run takes, before any calibration.
 async function whatIf({ id, type, op, args, text, reply, context, provider, model, api_key, base_url }) {
@@ -1269,12 +1282,13 @@ try:
     elif _a["op"] == "parse":
         _out = _wi.parse_scenario(_a["text"])
     elif _a["op"] == "prompt":
-        _out = _wi.scenario_prompt(_a["context"])
+        _out = _wi.scenario_prompt(_a["context"], _a["text"])
     elif _a["op"] == "read":
-        # The rules' reading and, when they do not read it all, the device's prompt: one call, not two (#590).
+        # The rules' reading and, when they do not read it all, the device's prompt (its number enum is the
+        # line's own number tokens): one call, not two (#590).
         _out = _wi.parse_scenario(_a["text"])
         if not _out["matched"]:
-            _out["prompt"] = _wi.scenario_prompt(_a["context"])
+            _out["prompt"] = _wi.scenario_prompt(_a["context"], _a["text"])
     elif _a["op"] == "basin":
         _x = _a["args"]
         _out = _wi._basin_check(_x.get("river_id"), _x.get("lat"), _x.get("lon"))

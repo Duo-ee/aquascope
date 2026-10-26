@@ -4,8 +4,10 @@
 // The facts come from the package (aquascope.map_explain, in a light worker): this module only hands it what
 // the page already shows (the view, the map date, the layers that are on, the month of the river status, the
 // Floods ahead issue, the Floods past cells and today's gauge status) and pins what comes back. With the
-// on-device model, or the reader's own key from Ask, a model chooses, orders and words the notes; the
-// numbers are still put in by the package from the facts, and a note with any other number is refused. With
+// on-device model, or the reader's own key from Ask, the model picks and the code writes (#590): it chooses
+// which of the package's notes to show, in which order, and one of each note's fixed variants, as ids held to
+// a JSON Schema of enums (passed to Chrome's Prompt API as responseConstraint). Every word on a note is the
+// package's; a reply outside the enums is refused whole, said in one line, and the fixed wording stays. With
 // neither, the package's fixed wording is used. Every note goes in the action log (map-actions.js addPin),
 // so each one, or all, can be undone; asking again replaces the notes of the time before.
 
@@ -145,7 +147,7 @@ export function gatherView() {
 async function byDevice(res) {
   if (!res.prompt || !(await localModelReady())) return null;
   const reply = await generateJsonLocally({
-    system: res.prompt.system, prompt: "Write the notes.", schema: res.prompt.schema, timeoutMs: 30000,
+    system: res.prompt.system, prompt: res.prompt.prompt || "Choose the notes.", schema: res.prompt.schema, timeoutMs: 30000,
   });
   const checked = await callLight("map_explain", { op: "check", reply, facts: res.facts, view: res.view }, { priority: QUICK_PRIORITY });
   return { ...checked, model: localReaderLabel() || "the on-device model" };
@@ -218,16 +220,16 @@ export async function explainView({ say = () => {} } = {}) {
     const device = await byDevice(res).catch((err) => ({ error: err.message, model: localReaderLabel() || "the on-device model" }));
     if (my !== run) return [];
     if (device && device.notes && device.notes.length) {
-      notes = device.notes; by = "device"; who = [device.model, "on this device"]; refused = device.refused || [];
+      notes = device.notes; by = "device"; who = [device.model, "chose on this device; words by code"]; refused = device.refused || [];
     } else {
-      // The device was asked and none of its notes passed: the rules' notes stand, and the line says the model's
-      // wording was refused (and why), not that there was no model (#590).
+      // The device was asked and none of its picks was used: the rules' notes stand, and the line says the
+      // model's reply was refused (and why), not that there was no model (#590).
       if (device) { who = explainWho(device); refused = device.refused || []; }
       if (askModelConfig()) say(`<span class="spinner" aria-hidden="true"></span>Asking ${escapeHtml(askModelConfig().label)}…`);
       const key = await byKey(res).catch((err) => ({ error: err.message, model: askModelConfig() && askModelConfig().label }));
       if (my !== run) return [];
       if (key && key.notes && key.notes.length) {
-        notes = key.notes; by = "key"; who = [key.model, "your key"]; refused = key.refused || [];
+        notes = key.notes; by = "key"; who = [key.model, "chose with your key; words by code"]; refused = key.refused || [];
       } else if (key) {
         who = explainWho(key);
         refused = [...refused, ...(key.refused || [])];
@@ -240,8 +242,11 @@ export async function explainView({ say = () => {} } = {}) {
   const ids = pinNotes(notes, by);
   renderLog();
   const n = ids.length;
-  const refusedLine = refused.length
-    ? `<span class="ma-note">${refused.length} of the model's notes refused: ${escapeHtml(refused.join("; "))}</span>` : "";
+  // A refusal in one short line: the whole reply, or how many of its picks, and why (#590).
+  const whole = refused.length === 1 && /^the model's reply was refused/.test(refused[0]);
+  const refusedLine = !refused.length ? "" : whole
+    ? `<span class="ma-note">${escapeHtml(refused[0].charAt(0).toUpperCase() + refused[0].slice(1))}; the fixed wording is shown</span>`
+    : `<span class="ma-note">${refused.length} of the model's picks not used: ${escapeHtml(refused.join("; "))}</span>`;
   const credit = (res.credits || []).find((c) => c.startsWith("Places:"));
   say(`<b class="ma-who">${escapeHtml(who[0])}</b><span class="ma-how">${escapeHtml(who[1])}</span>` +
     `<span>${n} note${n === 1 ? "" : "s"} on the map, each with its source</span>${refusedLine}` +

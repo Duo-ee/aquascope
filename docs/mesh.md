@@ -163,18 +163,21 @@ every month on record and every finding says "Not this event": it tells where fl
 have been seen, not whether this event was modelled right. A check says it was skipped
 when the file cannot answer it (no bed levels, no time steps, no volume accounting).
 
-The checks are code. With the on-device model, or a key in Ask, a model only orders the
-findings and words them, writing each number as a placeholder (`{f3}`) that code fills
-in; Explain's claim lock (`aquascope.map_explain.claim_lock`) refuses wording with any
-other number or with a sign or a digit set against a placeholder ("-{f3}", "{f3}0",
-`placeholder_touches`, the check Explain and Scout make too), and a ranking word the rules
-wording does not use is refused too. A count made under a threshold names it: the film check's
-"cells wetted only by a film" are those under its own fact "A film is shallower than" (0.03 m),
-so wording that puts the count under another value ("8 cells (< {f1} m)", where `f1` is one
-cell's largest depth) is refused even though both numbers are facts. Wording that drops a "not" of
-the rules wording is refused too (`negation_flip`): the deepest water is "worth a look if it is not a
-channel or a pit you expect", and "investigate if it's an expected feature" turns that round. The
-line under the box gives the reason for each refusal. Without a model, the package's templates say it.
+The checks are code, and so is every word of a pin. With the on-device model, or a key in
+Ask, the model picks and the code writes (#590): the model decides which findings to pin,
+in what order, and which of three fixed wordings of each to show (`review_variants`: `a` the
+rules' title and reason, `b` the check's name over the same reason, `c` the rules' title over
+the reason's first sentence). Its reply is a JSON object held to a schema whose values are
+enums, the finding ids and the variant ids (`review_schema`, passed to Chrome as
+`responseConstraint`). It cannot change a value, a count, a bound, a severity or a "not": "Two
+cells", "the deepest water is 17.1 m" without "in this part of the mesh", or "check if this depth
+is expected" cannot reach a pin. A problem is pinned even when the model leaves it out; the
+other findings it leaves out are said in the line ("2 findings not pinned"), and the legend's
+list of checks keeps every one. The review's counts are always the rules' counts. A reply
+outside the schema is refused whole (`aquascope.map_pick.pick`), the line says so in one short
+sentence, and every finding is pinned in the rules' order and wording. The older wording checks
+(`negation_flip`, Explain's `claim_lock`) stay as a second line of defence: the tests hold every
+variant to them. Without a model, the package's templates say it.
 
 ```bash
 aquascope mesh review my_run.p01.hdf             # with observed floods and gauges

@@ -39,13 +39,14 @@ export const BY_LABEL = { rules: "rules", device: "on device", key: "your key", 
 
 /**
  * Who a line under the box names when a model was asked and the rules' words stand (#590): [who, how], saying
- * why the model's words were not used. `asked` is { model, error?, refused? }.
+ * why the model's choice was not used (it picks the package's notes, #590 round 3). `asked` is { model, error?,
+ * refused? }.
  */
 export function explainWho(asked) {
   const name = (asked && asked.model) || "The model";
   if (asked && asked.error) return ["Rules", `${name} did not answer (${asked.error})`];
-  if (asked && (asked.refused || []).length) return ["Rules", `${name}'s wording was refused`];
-  return ["Rules", `${name} wrote no note`];
+  if (asked && (asked.refused || []).length) return ["Rules", `${name}'s choice was refused`];
+  return ["Rules", `${name} chose no note`];
 }
 
 export const MAX_ENTRIES = 60;

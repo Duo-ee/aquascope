@@ -10,61 +10,39 @@
 //
 // Neither does native tool calling reliably at this size, so the loop here is
 // deliberately smaller than the Python one: the model picks one tool at a time
-// from a short list by replying with JSON, we run it in the worker, and after a
-// few steps it writes the answer. That is honest about what a 4B model can do,
-// and the UI says "on your device, reduced tool set" rather than pretending it
-// is the same Analyst.
+// from a short list by replying with JSON, we run it in the worker, and then it
+// picks the facts of its answer by key. It never writes a sentence the reader
+// sees: AquaScope writes each one from the tool results (#590, round 3). The UI
+// says "on your device, reduced tool set" rather than pretending it is the same
+// Analyst.
 
 import {
   askLoop, createSession, deviceAnswerHtml, samplingNote, samplingOptions, sessionPool,
 } from "./ask-local-core.js?v=__BUILD__";
 
+// No example arguments: check3 found the model copying the example id "abc" into a real call. Which ids and
+// places a call may take is in each step's message and schema, built from the question.
 export const LOCAL_TOOLS = [
-  {
-    name: "find_stations",
-    description: "Search the world gauge catalog. query for a name, near=[lat, lon] for the nearest, variable to filter.",
-    example: '{"tool": "find_stations", "arguments": {"query": "Kingston", "limit": 5}}',
-  },
-  {
-    name: "analyze_station",
-    description: "Fetch and analyse one station: record, flood frequency, flow duration, trend.",
-    example: '{"tool": "analyze_station", "arguments": {"source": "uk_ea", "station_id": "abc"}}',
-  },
-  {
-    name: "anywhere",
-    description: "Climate and modelled discharge at a point with no gauge (lat, lon).",
-    example: '{"tool": "anywhere", "arguments": {"lat": 25.05, "lon": 121.55}}',
-  },
-  {
-    name: "describe_catchment",
-    description: "The catchment of a point: area, climate, land cover, population.",
-    example: '{"tool": "describe_catchment", "arguments": {"lat": 47.0, "lon": -68.6}}',
-  },
+  { name: "find_stations", description: "Search the world gauge catalog: query (words from the question) or near [lat, lon]; limit up to 10." },
+  { name: "analyze_station", description: "One gauge's record, flow duration, flood frequency and trend: source and station_id." },
+  { name: "anywhere", description: "Climate and modelled discharge at a point with no gauge: lat, lon." },
+  { name: "describe_catchment", description: "The catchment of a point: area, climate, land cover, population: lat, lon." },
 ];
 
-const SYSTEM = `You are AquaScope's assistant, running on the reader's own machine.
-Answer only from tool results. You have these tools:
-${LOCAL_TOOLS.map((t) => `- ${t.name}: ${t.description}\n  example: ${t.example}`).join("\n")}
+const SYSTEM = `You are AquaScope's assistant, running on the reader's own machine. You do not write the answer: you
+choose. AquaScope writes every sentence the reader sees from the tool results.
+Tools:
+${LOCAL_TOOLS.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
 
-Reply with ONE JSON object and nothing else, either
+Each message gives the question, the tools you may call now with the gauge ids and points they may take, and the
+facts you may answer with, each by its key. Reply with ONE JSON object and nothing else, either
   {"tool": "<name>", "arguments": {...}}
-to call a tool, or
-  {"answer": "<two or three sentences, with units and the station name>"}
-when you have enough. Never invent numbers: every figure must appear in a tool result.
-For a trend, copy the result's "reading" as it is. Write each gauge's id next to its own name.
-Give each number under its own label: Q95 is flow_duration.q95, the minimum is daily_values.min, an N-year
-flood is the return level for T_years N. Name the method of a flood figure (GEV or LP3).
-When the question asks for several gauges, answer with the list find_stations gave (names and ids):
-do not analyse one of them instead.`;
-
-const JSON_SCHEMA = {
-  type: "object",
-  properties: {
-    tool: { type: "string", enum: LOCAL_TOOLS.map((t) => t.name) },
-    arguments: { type: "object" },
-    answer: { type: "string" },
-  },
-};
+to run a tool, or
+  {"answer": ["<fact key>", ...]}
+with the keys of the facts that answer the question, in the order to show them. Use only the keys, ids and points
+the message lists. Do not call a tool again with the same arguments: its result is already in the facts.
+For a list of gauges pick the search's gauges; for a trend pick the trend fact; for a flood pick the return level
+asked for.`;
 
 let engine = null;      // { kind: "prompt-api" | "webllm", generate(messages) }
 
@@ -130,7 +108,10 @@ export async function loadLocalModel(onProgress = () => {}) {
         try { session = typeof base.clone === "function" ? await base.clone() : null; } catch { session = null; }
         if (!session) session = await fresh();
         return {
-          generate: (prompt) => session.prompt(prompt, { responseConstraint: JSON_SCHEMA }),
+          // The step's schema: enums built by the package from this question's words and results. The signal is
+          // the step's time limit and the Stop button (askLoop), as generateJsonLocally's timeout is for the map.
+          generate: (prompt, schema, signal) => session.prompt(prompt, {
+            ...(schema ? { responseConstraint: schema } : {}), ...(signal ? { signal } : {}) }),
           close() { try { session.destroy(); } catch { /* fine */ } },
         };
       },
@@ -161,11 +142,12 @@ export async function loadLocalModel(onProgress = () => {}) {
     // WebLLM keeps no conversation: each call is the system prompt and this one prompt.
     async open() {
       return {
-        async generate(prompt) {
+        async generate(prompt, schema, signal) {
+          if (signal) signal.addEventListener("abort", () => { try { mlc.interruptGenerate(); } catch { /* fine */ } }, { once: true });
           const res = await mlc.chat.completions.create({
             messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }],
             temperature: 0.2,
-            response_format: { type: "json_object" },
+            response_format: schema ? { type: "json_object", schema: JSON.stringify(schema) } : { type: "json_object" },
           });
           return res.choices[0].message.content || "";
         },
@@ -261,13 +243,17 @@ export async function generateJsonLocally({ system, prompt, schema = null, tempe
 // ── the reduced loop ────────────────────────────────────────────────────────
 
 /**
- * Ask the local model, running tools through `callTool` (the worker, which returns the package's compact
- * result) and holding the answer to `lock` (the package's check). One fresh conversation per step.
+ * Ask the local model. `plan`, `callTool` and `render` are the package's steps in the worker
+ * (aquascope.ai_engine.device_ask: step_schema, check_call then the tool, render_answer): the model picks, the
+ * package checks and writes. One fresh conversation per step, each prompt ended by the time limit (STEP_MS,
+ * 25 s) or by `signal` (the Stop button).
  * Returns { answer, toolCalls, results, lock, model } and reports each step through onEvent.
  */
-export async function askLocally(question, { callTool, lock, onEvent = () => {}, maxSteps = 3, context = "" } = {}) {
+export async function askLocally(question, { plan, callTool, render, onEvent = () => {}, context = "", signal = null,
+                                            stepMs } = {}) {
   const eng = await loadLocalModel(onEvent);
-  const out = await askLoop(question, { open: () => eng.open(), callTool, lock, onEvent, maxSteps, context });
+  const out = await askLoop(question, { open: () => eng.open(), plan, callTool, render, onEvent, context, signal,
+    ...(stepMs ? { stepMs } : {}) });
   return { ...out, model: eng.label, sampling: eng.sampling };
 }
 

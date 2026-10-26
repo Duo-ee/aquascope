@@ -16,10 +16,15 @@ findings are made here by fixed rules, the same for the browser, the MCP tool, t
 * ``models_disagree``: the gauges where even the best model scored in the evidence table
   (``skill/model_skill.parquet``) does no better than the gauge's own mean flow.
 
-Every number is formatted here, by code, into the finding's ``slots``. The keyless titles and reasons are
-templates over those slots. A model (the reader's own key, or the on-device model) may reorder the findings
-and reword them, but its words are held to the slots: any digit, percent sign or number word outside a
-``{slot}`` placeholder rejects that wording and the template stays (:func:`apply_wording`, the claim lock).
+Every number is formatted here, by code, into the finding's ``slots``. The titles and reasons are templates over
+those slots, each in up to three fixed variants (:data:`VARIANTS`; ``a`` is the rules' own). The model picks, the
+code writes (#590, round 3): a model (the reader's own key, or the on-device model) decides the order of the
+findings and which variant each is said in, as ids held to a JSON Schema of enums (:func:`wording_schema`). It
+writes no title and no reason, so no number, date, place, severity or likelihood of its own can reach a pin. The
+words "severe", "high", "a high chance", "a substantial chance" and "a small chance" come only from the facts,
+by :data:`SEVERITY_FROM_RP` and :data:`CHANCE_FROM_SHARE`. A reply outside the enums is refused whole and the
+rules' order and wording stand (:func:`apply_wording`). The older wording checks (:func:`check_wording`,
+:func:`claim_kept`) stay as a second line of defence; the tests hold every variant to them.
 
 Two ways to run it:
 
@@ -374,8 +379,130 @@ TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
+#: Each template's fixed variants (#590, round 3): a model picks one by id, the package holds the words. ``a`` is
+#: :data:`TEMPLATES`, the rules' own. A severity or likelihood word appears only through a slot the code fills
+#: from the facts (:data:`SEVERITY_FROM_RP`, :data:`CHANCE_FROM_SHARE`).
+VARIANTS: dict[str, dict[str, dict[str, str]]] = {
+    "status_much_above": {
+        "a": TEMPLATES["status_much_above"],
+        "b": {"title": "{place}: much above normal in {month}",
+              "reason": "Much above normal across {area} in {month}: modelled monthly flow over the 90th "
+                        "percentile for the month.{record}"},
+        "c": {"title": "Rivers much above normal: {place}",
+              "reason": "In {month}, rivers across {area} around this pin were much above normal (modelled "
+                        "monthly flow over the 90th percentile for the month).{record}"},
+    },
+    "status_much_below": {
+        "a": TEMPLATES["status_much_below"],
+        "b": {"title": "{place}: much below normal in {month}",
+              "reason": "Much below normal across {area} in {month}: modelled monthly flow under the 10th "
+                        "percentile for the month.{record}"},
+        "c": {"title": "Rivers much below normal: {place}",
+              "reason": "In {month}, rivers across {area} around this pin were much below normal (modelled "
+                        "monthly flow under the 10th percentile for the month).{record}"},
+    },
+    "floods_ahead": {
+        "a": TEMPLATES["floods_ahead"],
+        "b": {"title": "{place}: forecast at its {rp} flow",
+              "reason": "{members} ensemble members reach the 2-year flow of {q2} in the GEOGLOWS forecast of "
+                        "{issue}; the peak, {peak} on {day}, is at or above the {rp} flow{rpflow}.{nearby}"},
+        "c": {"title": "{place}: {headline}",
+              "reason": "GEOGLOWS forecast of {issue}: {chance}. The peak, {peak} on {day}, is at or above the "
+                        "{rp} flow{rpflow}.{nearby}"},
+    },
+    "floods_past": {
+        "a": TEMPLATES["floods_past"],
+        "b": {"title": "Floods in the news: {place}, {month}",
+              "reason": "In {month}, {events_lower} in the news started in these cells{radar}.{record}"},
+        "c": {"title": "{place}: flood reports in {month}",
+              "reason": "{events} in the news, by Groundsource's count, started here in {month}{radar}.{record}"},
+    },
+    "gauges_today_much_below": {
+        "a": TEMPLATES["gauges_today_much_below"],
+        "b": {"title": "Gauges much below normal: {place}",
+              "reason": "{gauge} is {extreme}. {count} much below normal for {date}."},
+        "c": {"title": "{place}: gauges much below normal on {date}",
+              "reason": "{count} much below normal for {date}. {gauge} is {extreme}."},
+    },
+    "gauges_today_much_above": {
+        "a": TEMPLATES["gauges_today_much_above"],
+        "b": {"title": "Gauges much above normal: {place}",
+              "reason": "{gauge} is {extreme}. {count} much above normal for {date}."},
+        "c": {"title": "{place}: gauges much above normal on {date}",
+              "reason": "{count} much above normal for {date}. {gauge} is {extreme}."},
+    },
+    "models_disagree": {
+        "a": TEMPLATES["models_disagree"],
+        "b": {"title": "Models miss {gauge_short}",
+              "reason": "At {gauge}, the best of {models} scored, {model}, has a KGE of {kge} over {period}: no "
+                        "better than the gauge's own mean flow. Its mean flow is {bias}."},
+        "c": {"title": "{gauge_short}: no model beats the mean flow",
+              "reason": "None of the {models} scored here does better than the gauge's own mean flow over "
+                        "{period}: the best, {model}, has a KGE of {kge}. Worth checking what the gauge measures "
+                        "before trusting either."},
+    },
+}
+
+#: The severity words a Floods ahead pin may carry, by its return-period class: "severe" from the 50-year flow,
+#: "high" for the 10- and 25-year flows, none below (the 2- and 5-year flows are common). Nothing else in Scout
+#: says severe.
+SEVERITY_FROM_RP: tuple[tuple[int, str], ...] = ((50, "severe"), (10, "high"))
+#: The likelihood words, by the share of the 51 ensemble members that reach the 2-year flow: every member; "a
+#: high chance" from three quarters (39 members); "a substantial chance" from two fifths (21 members); "a small
+#: chance" below.
+CHANCE_FROM_SHARE: tuple[tuple[float, str], ...] = ((0.75, "a high chance"), (0.4, "a substantial chance"),
+                                                     (0.0, "a small chance"))
+
+
+def severity_words(rp: int) -> str:
+    """The severity word for a forecast at its ``rp``-year flow (:data:`SEVERITY_FROM_RP`), or ""."""
+    return next((w for floor, w in SEVERITY_FROM_RP if int(rp) >= floor), "")
+
+
+def chance_words(members: int | None, q2: str) -> str:
+    """How likely the forecast is to pass the 2-year flow, from ``members`` of :data:`MEMBERS` reaching it
+    (:data:`CHANCE_FROM_SHARE`): a phrase with its count, written by code."""
+    if members is None:
+        return f"some ensemble members reach the 2-year flow of {q2}"
+    if members >= MEMBERS:
+        return f"every ensemble member reaches the 2-year flow of {q2}"
+    word = next(w for floor, w in CHANCE_FROM_SHARE if members / MEMBERS >= floor)
+    return f"{word} of passing the 2-year flow of {q2} ({members} of {MEMBERS} ensemble members)"
+
+
 def render(template: str, slots: dict[str, str]) -> str:
     return re.sub(r"\s+", " ", template.format(**slots)).strip()
+
+
+def variant_text(f: dict[str, Any], variant: str = "a") -> tuple[str, str] | None:
+    """A finding's title and reason in one of its template's variants, or None when a slot it needs is missing
+    (a daily file written before the variant)."""
+    v = VARIANTS.get(f["template"], {}).get(variant)
+    if not v:
+        return None
+    try:
+        slots = {**_derived_slots(f["slots"]), **f["slots"]}
+        return render(v["title"], slots), render(v["reason"], slots)
+    except (KeyError, IndexError):
+        return None
+
+
+def _derived_slots(slots: dict[str, str]) -> dict[str, str]:
+    """The slots a later variant needs, worked out from a finding's other slots (a daily file written before the
+    variant has those): the words lower-cased, the severity from the return-period class, the likelihood from
+    the members' count."""
+    out: dict[str, str] = {}
+    if "events" in slots:
+        out["events_lower"] = slots["events"][:1].lower() + slots["events"][1:]
+    rp = re.match(r"(\d+)-year$", str(slots.get("rp") or ""))
+    if rp:
+        word = severity_words(int(rp.group(1)))
+        out["headline"] = f"{word} flow forecast, the {rp.group(0)} flow" if word else f"{rp.group(0)} flow forecast"
+    members = str(slots.get("members") or "")
+    if "q2" in slots and members:
+        k = MEMBERS if members.startswith("All") else (int(members.split(" ")[0]) if members[:1].isdigit() else None)
+        out["chance"] = chance_words(k, slots["q2"])
+    return out
 
 
 def _finding(fid: str, kind: str, template: str, lat: float, lon: float, *, score: float,
@@ -396,10 +523,11 @@ def _finding(fid: str, kind: str, template: str, lat: float, lon: float, *, scor
 
 
 def retitle(f: dict[str, Any]) -> dict[str, Any]:
-    """Render a finding's template again after its slots changed (a place name filled in)."""
-    t = TEMPLATES[f["template"]]
-    if f.get("by", "rules") == "rules":
-        f["title"], f["reason"] = render(t["title"], f["slots"]), render(t["reason"], f["slots"])
+    """Render a finding's words again after its slots changed (a place name filled in), in its variant (the
+    rules' own, ``a``, unless a model picked another)."""
+    got = variant_text(f, f.get("variant") or "a") or variant_text(f, "a")
+    if got:
+        f["title"], f["reason"] = got
     return f
 
 
@@ -604,6 +732,9 @@ def floods_ahead_findings(features: list[dict[str, Any]], manifest: dict[str, An
                    "rpflow": f" of {fmt_num(q)} m³/s" if q and rp != 2 else "",
                    "day": day_words(h["day"]) if h.get("day") else "a day in the next 15",
                    "issue": day_words(issue) if issue else "today", "members": members,
+                   "headline": (f"{severity_words(rp)} flow forecast, the {rp}-year flow" if severity_words(rp)
+                                else f"{rp}-year flow forecast"),
+                   "chance": chance_words(k, f"{fmt_num(q2)} m³/s"),
                    "nearby": (f" {nearby} more reach{'es' if nearby != 1 else ''} within {group_km:g} km "
                               f"{'do' if nearby != 1 else 'does'} too." if nearby else "")},
             facts=[{"label": "Forecast peak", "value": sig(float(peak), 3), "unit": "m³/s"},
@@ -697,7 +828,8 @@ def floods_past_findings(cells: list[list[int]], month: str, *, deg: float = 0.5
         out.append(_finding(
             f"floods_past:{month}:{best[0]}:{best[1]}", "floods_past", "floods_past", lat, lon,
             score=min(1.0, news / 200.0) * 0.8 + (0.2 if rank == 1 and news else 0.0),
-            slots={"month": month_words(month), "events": events, "record": record,
+            slots={"month": month_words(month), "events": events, "events_lower": events[:1].lower() + events[1:],
+                   "record": record,
                    "radar": (f", and Sentinel-1 radar saw {radar:,} flooded 20 m pixels" if radar else "")},
             facts=[{"label": "Flood events in the news", "value": news},
                    *([{"label": "Radar flood detections (20 m)", "value": radar}] if radar else []),
@@ -1018,7 +1150,7 @@ def _mark_places(findings: list[dict[str, Any]]) -> None:
             retitle(f)
 
 
-# ── the claim lock: a model may order and word, never write a number ────────
+# ── the older wording checks: a second line of defence (#590) ──────────────
 
 _NUMBER_WORDS = re.compile(
     r"\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
@@ -1059,7 +1191,7 @@ CLAIMS: dict[str, dict[str, Any]] = {
     "gauges_today_much_below": {"says": "gauges much below normal", "need": [_LOW], "not": [_HIGH]},
     "floods_ahead": {"says": "a flow forecast", "need": [r"\b(?:forecast\w*|flood\w*|flow\w*|peak\w*|predict\w*|"
                                                           r"expect\w*)\b|\{(?:rp|peak|day|issue)\}"], "not": []},
-    "floods_past": {"says": "floods reported", "need": [r"\bflood\w*|\{events\}"], "not": []},
+    "floods_past": {"says": "floods reported", "need": [r"\bflood\w*|\{events(?:_lower)?\}"], "not": []},
     "models_disagree": {
         "says": "models miss this river",
         "need": [r"\bmodel\w*|\{models?\}",
@@ -1119,116 +1251,99 @@ def check_wording(text: str, slots: dict[str, str], limit: int) -> tuple[str | N
     return filled, None
 
 
+def wording_schema(ids: list[str], max_pins: int = MAX_PINS) -> dict[str, Any]:
+    """The JSON Schema a model's reply is held to: up to ``max_pins`` picks in its order, each a finding id from
+    ``ids`` and a variant id (:data:`aquascope.map_pick.VARIANTS`). Nothing in it is free text."""
+    from aquascope.map_pick import VARIANTS as IDS
+    from aquascope.map_pick import choice
+
+    return {"type": "object", "required": ["pins"], "additionalProperties": False, "properties": {
+        "pins": {"type": "array", "minItems": 1, "maxItems": max_pins, "items": {
+            "type": "object", "required": ["id", "variant"], "additionalProperties": False,
+            "properties": {"id": choice(ids), "variant": choice(IDS)}}}}}
+
+
+#: Past this many characters the prompt gives the other variants' titles only.
+PROMPT_CHARS = 9000
+
+
 def wording_prompt(findings: list[dict[str, Any]], max_pins: int = MAX_PINS, context: str = "") -> dict[str, Any]:
-    """The system prompt, the user message and the reply schema for a model that orders and words the findings."""
-    items = [{"id": f["id"], "kind": KINDS[f["kind"]]["label"], "where": f["slots"].get("place"),
-              "rules_title": f["title"], "rules_reason": f["reason"], "slots": sorted(f["slots"])} for f in findings]
+    """The system prompt, the user message and the reply schema for a model that orders the findings and picks a
+    variant of each. The model picks, the code writes (#590, round 3): it chooses the order and, per finding,
+    one of the package's fixed variants. It writes no title and no reason, so it can add no number, date,
+    place, severity or likelihood; those words come from the facts by the thresholds in
+    :data:`SEVERITY_FROM_RP` and :data:`CHANCE_FROM_SHARE`."""
+    from aquascope.map_pick import VARIANTS as IDS
+
+    def block(full: bool) -> list[str]:
+        out = []
+        for f in findings:
+            out.append(f"{f['id']} ({KINDS[f['kind']]['label']}):")
+            for v in IDS:
+                got = variant_text(f, v)
+                if got:
+                    out.append(f"  {v}: {got[0]}. {got[1]}" if full or v == "a" else f"  {v}: {got[0]}.")
+        return out
+
+    lines = block(True)
+    if sum(len(x) for x in lines) > PROMPT_CHARS:
+        lines = block(False)
     system = "\n".join([
-        "You brief a hydrologist on what stands out on a world map of rivers. Below are findings made by code from "
-        "published data, each with an id, its rules wording and the names of its slots.",
-        f"Pick at most {max_pins} findings, most worth a look first, and write for each a short title (at most "
-        "70 characters) and a reason (one or two plain sentences, at most 260 characters).",
-        "Never write a number, a percent sign, a number word or a word like record, largest, highest or most. "
-        "Every number, date, place and ranking comes from the slots: write {slot_name} where it goes, for example "
-        "{area}, {month}, {peak}, {place}. The code fills them in; wording that breaks this rule is thrown away.",
-        "Do not add causes, forecasts or advice that the rules wording does not hold, and keep what each finding "
-        "says: when the rules say the models miss a river, the reason says the models miss it, not that the gauge "
-        "is in doubt; much below normal stays below, much above stays above.",
-        'Reply with ONE JSON object: {"order": [ids], "notes": [{"id", "title", "reason"}]}.',
+        "You brief a hydrologist on what stands out on a world map of rivers. Code found each finding below in "
+        "published data and wrote it in up to three variants. You only choose; you never write a word of a pin.",
+        "",
+        *lines,
+        "",
+        f"Pick at most {max_pins} findings, the most worth a look first, and for each the variant that reads best.",
+        'Reply with ONE JSON object and nothing else: {"pins": [{"id": "<a finding id>", "variant": "a"}]}',
     ])
     if context:
         system += f"\n\nWhat the reader is looking at: {context}"
-    return {"system": system, "prompt": json.dumps({"findings": items}, ensure_ascii=False),
-            "schema": {"type": "object", "required": ["order", "notes"], "properties": {
-                "order": {"type": "array", "items": {"type": "string"}, "maxItems": max_pins},
-                "notes": {"type": "array", "maxItems": max_pins, "items": {
-                    "type": "object", "required": ["id", "title", "reason"],
-                    "properties": {"id": {"type": "string"}, "title": {"type": "string"},
-                                   "reason": {"type": "string"}}}}}}}
-
-
-def _reply_json(reply: Any) -> Any:
-    if not isinstance(reply, str):
-        return reply
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", reply.strip())
-    start = raw.find("{")
-    if start < 0:
-        return None
-    try:
-        data, _ = json.JSONDecoder().raw_decode(raw[start:])
-        return data
-    except ValueError:
-        return None
-
-
-def _loose_id(fid: Any) -> str:
-    return re.sub(r"[^0-9a-z]", "", str(fid).lower())
+    return {"system": system, "prompt": "Choose the pins.",
+            "schema": wording_schema([f["id"] for f in findings], max_pins)}
 
 
 def apply_wording(findings: list[dict[str, Any]], reply: Any, *, max_pins: int = MAX_PINS,
                   by: str = "model") -> dict[str, Any]:
-    """Hold a model's reply to the claim lock: ``{"findings", "refused", "ordered", "unknown"}``. The model's order
-    is kept for the ids it knows (the rules order fills the rest); each title and reason that passes
-    :func:`check_wording` and :func:`claim_kept` replaces the template, the others keep it and are listed in
-    ``refused``. An id the model wrote with other punctuation still finds its finding, and the findings it left
-    out of its order follow in the rules' order (up to ``max_pins``), so none is dropped. ``unknown`` lists up to
-    three ids the model wrote that are no finding here."""
-    data = _reply_json(reply)
+    """Hold a model's reply to :func:`wording_schema` and apply it: ``{"findings", "refused", "ordered",
+    "unknown"}``. A reply with any id or variant outside the schema's enums, or any other field, is refused
+    whole (:func:`aquascope.map_pick.pick`): the rules' order and wording stand and ``refused`` says why. A
+    reply that fits sets the order of the findings it picks and the variant of each (``by`` marks them); the
+    findings it left out follow in the rules' order, up to ``max_pins``, so none is dropped. A variant whose
+    slots a finding lacks (a daily file written before it) keeps the rules' variant, and says so."""
+    from aquascope.map_pick import pick
+
+    data, errors = pick(reply, wording_schema([f["id"] for f in findings], max_pins))
+    if errors:
+        more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
+        return {"findings": [dict(f) for f in findings[:max_pins]], "ordered": False, "unknown": [],
+                "refused": [f"the model's reply was refused: {errors[0]}{more}"]}
     byid = {f["id"]: f for f in findings}
-    refused: list[str] = []
-    if not isinstance(data, dict):
-        return {"findings": [dict(f) for f in findings[:max_pins]], "refused": ["the model did not reply with JSON"],
-                "ordered": False}
-    # An id the model wrote with other punctuation ("2026-09-1" for "2026-09:1") still finds its finding,
-    # when only one finding reads that way.
-    loose: dict[str, list[str]] = {}
-    for f in findings:
-        loose.setdefault(_loose_id(f["id"]), []).append(f["id"])
-
-    def known(x: Any) -> str | None:
-        x = str(x)
-        if x in byid:
-            return x
-        same = loose.get(_loose_id(x)) or []
-        return same[0] if len(same) == 1 else None
-
-    named = [str(x) for x in data.get("order") or []] + [str(n.get("id")) for n in data.get("notes") or []
-                                                         if isinstance(n, dict)]
-    # The ids the model wrote that are no finding here (a gauge it was told of but is not in view): said, not lost.
-    unknown = [x for x in dict.fromkeys(named) if x and x != "None" and not known(x)][:3]
-    order = [i for i in dict.fromkeys(known(x) for x in data.get("order") or []) if i][:max_pins]
-    ordered = bool(order)
-    # The findings the model left out follow in the rules' order: none is dropped for a missing or mangled id.
-    order += [f["id"] for f in findings if f["id"] not in order]
-    order = order[:max_pins]
-    notes: dict[str, Any] = {}
-    for n in data.get("notes") or []:
-        fid = known(n.get("id")) if isinstance(n, dict) else None
-        if fid and fid not in notes:
-            notes[fid] = n
-    out = []
-    for rank, fid in enumerate(order, 1):
+    picked: dict[str, str] = {}
+    for p in data["pins"]:
+        picked.setdefault(p["id"], p["variant"])
+    order = list(picked) + [f["id"] for f in findings if f["id"] not in picked]
+    out, refused = [], []
+    for rank, fid in enumerate(order[:max_pins], 1):
         f = {**byid[fid], "slots": dict(byid[fid]["slots"]), "rank": rank}
-        n = notes.get(fid)
-        if n:
-            title, why_t = check_wording(n.get("title"), f["slots"], 80)
-            reason, why_r = check_wording(n.get("reason"), f["slots"], 400)
-            # The numbers can all be right and the finding turned round: its words must keep its claim.
-            why_k = claim_kept(slots_back(str(n.get("title") or ""), f["slots"]),
-                               slots_back(str(n.get("reason") or ""), f["slots"]), f.get("template"))
-            if title and reason and not why_k:
-                f.update(title=title, reason=reason, by=by)
-            else:
-                refused.append(f"{fid}: {why_t or why_r or why_k}")
+        if fid in picked:
+            variant = picked[fid]
+            got = variant_text(f, variant)
+            if not got:
+                refused.append(f"{fid}: variant {variant} cannot be written for it, the rules' wording is kept")
+                variant, got = "a", variant_text(f, "a")
+            f.update(variant=variant, by=by)
+            if got:
+                f["title"], f["reason"] = got
         out.append(f)
-    return {"findings": out, "refused": refused, "ordered": ordered, "unknown": unknown}
+    return {"findings": out, "refused": refused, "ordered": True, "unknown": []}
 
 
 def model_wording(findings: list[dict[str, Any]], *, provider: str | None = None, model: str | None = None,
                   api_key: str | None = None, base_url: str | None = None, context: str = "",
                   max_pins: int = MAX_PINS, client: Any = None) -> dict[str, Any]:
-    """Ask the reader's own model (their key, the provider registry) to order and word the findings, and hold its
-    reply to the claim lock. Nothing falls back to a key of ours."""
+    """Ask the reader's own model (their key, the provider registry) to order the findings and pick a variant of
+    each, and hold its reply to the schema (:func:`apply_wording`). Nothing falls back to a key of ours."""
     from aquascope.ai_engine.analyst import resolve_llm
     from aquascope.ai_engine.llm_transport import make_client
 
@@ -1238,7 +1353,7 @@ def model_wording(findings: list[dict[str, Any]], *, provider: str | None = None
         model, provider = cfg["model"], cfg["provider"]
     p = wording_prompt(findings, max_pins, context)
     resp = client.chat.completions.create(
-        model=model, temperature=0, max_tokens=1800,
+        model=model, temperature=0, max_tokens=600,
         messages=[{"role": "system", "content": p["system"]}, {"role": "user", "content": p["prompt"]}],
     )
     res = apply_wording(findings, resp.choices[0].message.content or "", max_pins=max_pins, by="key")
@@ -1471,9 +1586,9 @@ def daily(out: str | Path, *, base: str = ARCHIVE_BASE, warnings_dir: str | Path
         root = Path(warnings_dir) / "forecasts" / "warnings"
         root = root if root.exists() else Path(warnings_dir)
         if (root / "latest.geojson").exists():
-            warnings = json.loads((root / "latest.geojson").read_text())
+            warnings = json.loads((root / "latest.geojson").read_text(encoding="utf-8"))
             mpath = root / "manifest.json"
-            warnings["manifest"] = json.loads(mpath.read_text()) if mpath.exists() else {}
+            warnings["manifest"] = json.loads(mpath.read_text(encoding="utf-8")) if mpath.exists() else {}
             if warnings["manifest"].get("smoke"):
                 warnings = None   # a smoke run is never the day's issue
     res = scan(None, None, max_pins=MAX_PINS, warnings=warnings, places=False, base=base, top=top)
@@ -1553,7 +1668,7 @@ def publish(out: str | Path, *, repo_id: str = DEFAULT_REPO, token: str | None =
     from aquascope.archive.publish import publish_folder
 
     src = _publish_src(out)
-    doc = json.loads((src / "latest.json").read_text())
+    doc = json.loads((src / "latest.json").read_text(encoding="utf-8"))
     message = f"scout: {doc['date']}"
     with tempfile.TemporaryDirectory() as tmp:
         stage = Path(tmp) / FOLDER

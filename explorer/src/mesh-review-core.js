@@ -58,19 +58,28 @@ export function flaggedCells(pins, mesh) {
   return out;
 }
 
-/** Who worded the review, for the line under the bar: [who, how]. */
-export function reviewWho(by, model = "") {
-  if (by === "device") return [model || "On-device model", "worded on this device; checks and numbers by code"];
-  if (by === "key") return [model || "Your model", "worded with your key; checks and numbers by code"];
+/**
+ * Who picked the review's pins, for the line under the bar: [who, how]. The words are always the package's. `asked`
+ * names a model that was asked but whose choice is on no pin (refused, or no answer): said, not "no model" (#590).
+ */
+export function reviewWho(by, model = "", asked = "") {
+  if (by === "device") return [model || "On-device model", "picked on this device; checks and words by code"];
+  if (by === "key") return [model || "Your model", "picked with your key; checks and words by code"];
+  if (asked) return ["Rules", `${asked} asked, its choice not used; checks and words by code`];
   return ["Rules", "checks by code, no model"];
 }
 
-/** The line itself: the file reviewed (#590), the package's summary, and how many pins. */
-export function reviewLine(res, n, name = "") {
+/**
+ * The line itself: the file reviewed (#590), the package's summary (its counts are the rules' counts), and how
+ * many pins. `picked` says a model chose and ordered them; `leftOut` is how many findings it did not pin.
+ */
+export function reviewLine(res, n, name = "", { picked = false, leftOut = 0 } = {}) {
   const summary = (res && res.summary) || "";
   const head = name ? `${name}: ` : "";
   if (!n) return `${head}${summary} No pin to drop.`.trim();
-  return `${head}${summary} ${n} pin${n === 1 ? "" : "s"}, most severe first.`.trim();
+  const order = picked ? "in the model's order" : "most severe first";
+  const left = leftOut ? ` ${leftOut} finding${leftOut === 1 ? "" : "s"} not pinned (the model left ${leftOut === 1 ? "it" : "them"} out; the checks list has every one).` : "";
+  return `${head}${summary} ${n} pin${n === 1 ? "" : "s"}, ${order}.${left}`.trim();
 }
 
 const overlaps = (a, b) => Boolean(a && b) && a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];

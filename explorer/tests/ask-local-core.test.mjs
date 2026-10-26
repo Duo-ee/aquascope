@@ -1,26 +1,29 @@
-// On-device Ask (#590): a fresh conversation per question, the compact result the model sees, the lock's verdict
-// on the page, and the sampling options Chrome 155 accepts. The model replies are the ones Gemini Nano wrote on
-// 2026-10-25 (docs/assessments/ai-on-the-map.md); the lock is a stub here (its rules are tested in pytest).
+// On-device Ask (#590): a fresh conversation per step, the package's step schema passed to the model, the
+// package's sentences (never the model's) on the page, and the sampling options Chrome 155 accepts. The model
+// replies are the ones Gemini Nano wrote on 2026-10-26 (tests/fixtures/ondevice_ask_check3.json); the package's
+// plan, check and writer are stubs here (their rules, and the replay of every recorded reply, are in pytest:
+// tests/test_ai_engine/test_device_ask_pick.py).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  askLoop, createSession, deviceAnswerHtml, deviceAnswerMarkdown, parseReply, samplingNote, samplingOptions, sessionPool, stepPrompt,
+  askLoop, createSession, deviceAnswerHtml, deviceAnswerMarkdown, parseReply, samplingNote, samplingOptions, sessionPool,
   inView, selectedGaugeContext, withCatalogueName,
 } from "../src/ask-local-core.js";
 import { numbersIn, parseBriefReply } from "../src/intake.js";
 
-// An engine whose conversations remember what they were told, as a Prompt API session does.
+// An engine whose conversations remember what they were told, and the schema each prompt was held to.
 function recordingEngine(replies) {
   const convs = [];
   return {
     convs,
     open() {
-      const conv = { prompts: [], closed: false };
+      const conv = { prompts: [], schemas: [], closed: false };
       convs.push(conv);
       return {
-        async generate(prompt) {
+        async generate(prompt, schema) {
           conv.prompts.push(prompt);
+          conv.schemas.push(schema);
           return replies.shift();
         },
         close() { conv.closed = true; },
@@ -29,80 +32,125 @@ function recordingEngine(replies) {
   };
 }
 
-const POTOMAC = {
-  source: "usgs", station_id: "01646500", unit: "m3/s", start: "1930-03-01", end: "2026-10-24",
-  daily_values: { mean: 320.7738, min: 3.43, max: 12100 },
-  trend_annual_mean: { on: "annual mean", p_value: 0.82, sens_slope_per_year: 0.059, significant: false,
-    reading: "no significant trend in the annual mean (Mann-Kendall p = 0.82; Sen's slope +0.059 m3/s per year)" },
+const P = "USGS-01646500";
+const SENTENCES = {
+  [`${P}.mean`]: "The mean of the daily values at POTOMAC RIVER NEAR WASH, DC LITTLE FALLS PUMP STA (usgs USGS-01646500) is 321 m3/s.",
+  [`${P}.trend.mean`]: "At USGS-01646500 there is no significant trend in the annual mean (Mann-Kendall p = 0.953; Sen's slope -0.0365 m3/s per year).",
 };
+const SUMMARY_FACTS = Object.values(SENTENCES);
 
-test("each question opens its own conversation and closes it, so an earlier result cannot answer a later one", async () => {
-  const eng = recordingEngine([
-    '{"tool": "analyze_station", "arguments": {"source": "usgs", "station_id": "01646500"}}',
-    '{"answer": "Mean 320.7738 m3/s from 1930 to 2026."}',
-    // Recorded second question: no tool call, numbers from the first question's result.
-    '{"answer": "The 100-year flood (Q10) is not directly available; the record is from 1930-03-01."}',
-  ]);
-  const callTool = async () => ({ ok: true, compact: POTOMAC });
-  const lock = async (answer, results) => ({ ok: results.length > 0, refused: results.length ? [] : ["Q10 is in no result for this question"], facts: [], notes: [] });
-  const first = await askLoop("Summarise the record", { open: () => eng.open(), callTool, lock });
-  const second = await askLoop("What is the 100-year flood at this gauge?", { open: () => eng.open(), callTool, lock });
-  // One conversation per step: two for the first question (tool, answer), one for the second.
-  assert.equal(eng.convs.length, 3);
-  assert.ok(eng.convs.every((c) => c.closed), "every conversation is closed after its step");
-  assert.ok(eng.convs.every((c) => c.prompts.length === 1), "no conversation takes a second prompt");
-  assert.ok(!eng.convs[2].prompts.join(" ").includes("320.7738"), "the second question never saw the first result");
-  assert.equal(first.lock.ok, true);
-  assert.equal(second.results.length, 0);
-  assert.equal(second.lock.ok, false);
-});
+// The package's three steps, as stubs with its rules in small: the first step may only call a tool, the last (or
+// after a repeat) may only answer, an answer is the package's sentences for the keys picked, and anything else is
+// refused with the facts gathered.
+function packageStub({ budget = 3 } = {}) {
+  const plans = [];
+  return {
+    plans,
+    plan: async (a) => {
+      plans.push({ ...a, results: a.results.length, notes: [...a.notes] });
+      const keys = a.results.length ? Object.keys(SENTENCES) : [];
+      const mode = !keys.length ? "tool" : a.force || a.step >= budget ? "answer" : "either";
+      const props = {};
+      if (mode !== "answer") props.tool = { type: "string", enum: ["analyze_station"] };
+      if (mode !== "tool") props.answer = { type: "array", items: { type: "string", enum: keys } };
+      return { mode, budget, prompt: `step ${a.step}: ${a.words}`, schema: { type: "object", properties: props } };
+    },
+    callTool: async (reply, results) => {
+      const args = reply.arguments || {};
+      if (args.station_id !== P) return { ok: false, refused: `the gauge id '${args.station_id}' is in neither your words nor a result` };
+      if (results.some((r) => r.arguments.station_id === P)) return { ok: false, repeat: true, refused: "analyze_station already ran with these arguments" };
+      return { ok: true, name: "analyze_station", arguments: { source: "usgs", station_id: P }, compact: { station_id: P } };
+    },
+    render: async (reply, results, words, why) => {
+      const facts = results.length ? SUMMARY_FACTS : [];
+      if (why) return { ok: false, refused: [why], facts, notes: [] };
+      const picks = reply && reply.answer;
+      if (typeof picks === "string") return { ok: false, refused: ["the model wrote free text instead of picking facts by key"], facts, notes: [] };
+      if (!Array.isArray(picks) || !picks.every((k) => k in SENTENCES)) return { ok: false, refused: ["not among the facts"], facts, notes: [] };
+      const sentences = picks.map((k) => SENTENCES[k]);
+      return { ok: true, refused: [], sentences, text: sentences.join(" "), facts, notes: [] };
+    },
+  };
+}
 
-test("the model is shown the whole compact result, trend included, never a 3,000-character cut", async () => {
-  const eng = recordingEngine(['{"tool": "analyze_station", "arguments": {}}', '{"answer": "ok"}']);
-  const big = { ...POTOMAC, notes: ["x".repeat(3500)] };
-  await askLoop("Summarise", { open: () => eng.open(), callTool: async () => ({ ok: true, compact: big }),
-    lock: async () => ({ ok: true }) });
-  const second = eng.convs[1].prompts[0];
-  assert.ok(second.includes('"p_value":0.82') && second.includes("no significant trend"));
-  assert.ok(second.length > 3500);
-});
+const ANALYSE = `{"tool": "analyze_station", "arguments": {"source": "usgs", "station_id": "${P}"}}`;
+const SUMMARY = "Summarise the record at this gauge: period, mean, trend, and the flood frequency";
 
-test("a refused answer shows the tools' facts and one line why, never the model's text", async () => {
-  // Recorded: "Is the Potomac at Little Falls getting drier? Use the annual-mean trend." with no tool call.
-  const bad = "The Potomac at Little Falls shows an increasing trend. The Mann-Kendall test indicates an upward trend.";
-  const eng = recordingEngine([JSON.stringify({ answer: bad })]);
-  const res = await askLoop("Is the Potomac at Little Falls getting drier?", {
-    open: () => eng.open(), callTool: async () => ({ ok: true, compact: {} }),
-    lock: async () => ({ ok: false, refused: ["the answer states a trend, but no trend was computed for this question"], facts: [], notes: [] }),
-  });
+test("each step opens its own conversation, is held to the package's schema, and closes", async () => {
+  const eng = recordingEngine([ANALYSE, JSON.stringify({ answer: [`${P}.mean`, `${P}.trend.mean`] })]);
+  const pkg = packageStub();
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...pkg });
+  assert.equal(eng.convs.length, 2);
+  assert.ok(eng.convs.every((c) => c.closed && c.prompts.length === 1), "one prompt per conversation");
+  assert.deepEqual(Object.keys(eng.convs[0].schemas[0].properties), ["tool"], "the first step may only call a tool");
+  assert.deepEqual(eng.convs[1].schemas[0].properties.answer.items.enum, Object.keys(SENTENCES));
+  assert.equal(res.lock.ok, true);
+  assert.equal(res.answer, SUMMARY_FACTS.join(" "));
   const html = deviceAnswerHtml({ ...res, model: "Chrome built-in (Gemini Nano)" });
-  assert.ok(!html.includes("upward trend"));
-  assert.match(html, /The model's wording was refused: the answer states a trend, but no trend was computed/);
-  assert.match(html, /No tool ran for this question/);
-  const facts = deviceAnswerHtml({ answer: bad, lock: { ok: false, refused: ["x"], facts: ["Trend: no significant trend (p = 0.82)."], notes: [] } });
-  assert.match(facts, /<li>Trend: no significant trend \(p = 0\.82\)\.<\/li>/);
-  assert.match(deviceAnswerMarkdown("Q", { answer: bad, lock: { ok: false, refused: ["x"], facts: ["F"] } }), /refused: x\. .*\n\n- F/);
+  assert.ok(html.includes("no significant trend in the annual mean (Mann-Kendall p = 0.953"));
+  assert.match(html, /The model chose the tools and picked the facts; AquaScope wrote every sentence/);
 });
 
-test("a passing answer is shown with the lock's notes, and a broken lock fails closed", async () => {
-  const ok = deviceAnswerHtml({ answer: "KINGSTON VALE (E02102A).", lock: { ok: true, refused: [], facts: [],
-    notes: ["The search was near 51.1, 0.0, a point the model chose."] } });
-  assert.match(ok, /KINGSTON VALE \(E02102A\)\./);
-  assert.match(ok, /a point the model chose/);
-  const eng = recordingEngine(['{"answer": "Mean 999 m3/s."}']);
-  const res = await askLoop("q", { open: () => eng.open(), callTool: async () => ({}), lock: async () => { throw new Error("worker gone"); } });
+test("check3's loop: a repeated call is not run, the next step may only answer, and the page shows the facts", async () => {
+  // Recorded (ask-summary-1, ask-100yr-2, ask-50yr): analyze_station three times with the same arguments.
+  const eng = recordingEngine([ANALYSE, ANALYSE, ANALYSE]);
+  const pkg = packageStub();
+  let ran = 0;
+  const callTool = async (reply, results) => { const out = await pkg.callTool(reply, results); if (out.ok) ran += 1; return out; };
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...pkg, callTool });
+  assert.equal(ran, 1, "the tool ran once");
+  assert.equal(pkg.plans[2].force, true, "after the repeat the step is told to answer");
+  assert.deepEqual(Object.keys(eng.convs[2].schemas[0].properties), ["answer"]);
+  assert.ok(res.lock, "the lock is never null");
   assert.equal(res.lock.ok, false);
-  assert.match(res.lock.refused[0], /the check could not run \(worker gone\)/);
+  const html = deviceAnswerHtml({ ...res, model: "m" });
+  for (const f of SUMMARY_FACTS) assert.ok(html.includes(`<li>${f.replace(/'/g, "&#39;")}</li>`), f);
+  assert.ok(!html.includes("used its steps without reaching an answer"));
 });
 
-test("the page's own lines are not sent to the lock", async () => {
-  const eng = recordingEngine(["", '{"tool": "find_stations", "arguments": {}}', '{"tool": "find_stations", "arguments": {}}']);
-  const lock = async () => { throw new Error("must not be called"); };
-  const none = await askLoop("q", { open: () => eng.open(), callTool: async () => ({ ok: true, compact: {} }), lock });
-  assert.equal(none.canned, true);
-  const used = await askLoop("q", { open: () => eng.open(), callTool: async () => ({ ok: true, compact: {} }), lock, maxSteps: 2 });
-  assert.equal(used.canned, true);
-  assert.match(used.answer, /used its steps/);
+test("a free-text answer never reaches the page: refused, with the package's facts", async () => {
+  // Recorded (ask-anywhere's escape, in the Potomac's words): free text with a significance claim.
+  const bad = "significant trend in annual maxima with a p = 0.0689";
+  const eng = recordingEngine([ANALYSE, JSON.stringify({ answer: bad })]);
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...packageStub() });
+  const html = deviceAnswerHtml({ ...res, model: "m" });
+  assert.ok(!html.includes(bad));
+  assert.match(html, /The model&#39;s reply was refused: the model wrote free text instead of picking facts by key\. What the tools returned:/);
+  assert.match(deviceAnswerMarkdown("Q", res), /refused: the model wrote free text.*\n\n- The mean of the daily values/);
+});
+
+test("a call the words do not hold is not run, and the next step is told why", async () => {
+  // Recorded (ask-compare): analyze_station with uk_ea / "abc", the system prompt's old example id.
+  const eng = recordingEngine([ANALYSE, '{"tool": "analyze_station", "arguments": {"source": "uk_ea", "station_id": "abc"}}',
+    JSON.stringify({ answer: [`${P}.mean`] })]);
+  const pkg = packageStub({ budget: 5 });
+  const res = await askLoop("Compare the Potomac with the Thames", { open: () => eng.open(), ...pkg });
+  assert.equal(res.results.length, 1);
+  assert.match(pkg.plans[2].notes[0], /'abc' is in neither your words nor a result/);
+  assert.ok(res.toolCalls.some((c) => c.refused));
+  assert.equal(res.lock.ok, true);
+});
+
+test("a list of gauges the model picked reads as a list", () => {
+  const lock = { ok: true, picked: ["search.count", "E02102A.where", "3400TH.where"], notes: [],
+    sentences: ["The catalogue search for \u201cKingston\u201d returned 2 gauges.", "KINGSTON VALE (uk_ea E02102A), at 51.43, -0.26.",
+      "HOGSMILL AT EWELL (uk_ea 3400TH), at 51.35, -0.25."] };
+  assert.match(deviceAnswerHtml({ lock }), /<ul class="ask-device-facts"><li>The catalogue search/);
+  assert.match(deviceAnswerMarkdown("Q", { lock }), /\n- KINGSTON VALE \(uk_ea E02102A\), at 51\.43, -0\.26\.\n- HOGSMILL/);
+  assert.doesNotMatch(deviceAnswerHtml({ lock: { ...lock, picked: ["E02102A.where"] } }), /<ul/);
+});
+
+test("nothing to look up, the steps used, and a broken writer all end with one line, never a blank", async () => {
+  const none = await askLoop("What is a flood?", {
+    open: () => { throw new Error("no prompt"); }, plan: async () => ({ mode: "none", budget: 3 }),
+    callTool: async () => ({}), render: async (reply, results, words, why) => ({ ok: false, refused: [why], facts: [] }) });
+  assert.match(none.stopped, /nothing in the question to look up/);
+  assert.match(deviceAnswerHtml(none), /No answer: nothing in the question to look up.*No tool ran for this question/);
+  const eng = recordingEngine([JSON.stringify({ answer: [`${P}.mean`] })]);
+  const broken = await askLoop(SUMMARY, { open: () => eng.open(), plan: async () => ({ mode: "answer", budget: 1 }),
+    callTool: async () => ({}), render: async () => { throw new Error("worker gone"); } });
+  assert.equal(broken.lock.ok, false);
+  assert.match(broken.lock.refused[0], /the answer could not be written \(worker gone\)/);
 });
 
 test("parseReply tolerates prose around the JSON", () => {
@@ -169,71 +217,37 @@ function chromeLikeEngine(replies, { failFirst = 0 } = {}) {
   };
 }
 
-const SUMMARY = "Summarise the record at this gauge: period, mean, trend, and the flood frequency";
-
-test("the summary question reaches its answer: each step is the only prompt of its own session", async () => {
-  const eng = chromeLikeEngine([
-    '{"tool": "analyze_station", "arguments": {"source": "usgs", "station_id": "01646500"}}',
-    '{"answer": "USGS 01646500, 1930-03-01 to 2026-10-24: mean 320.7738 m3/s, no significant trend."}',
-  ]);
-  const res = await askLoop(SUMMARY, { open: () => eng.open(), callTool: async () => ({ ok: true, compact: POTOMAC }),
-    lock: async () => ({ ok: true, refused: [], facts: [], notes: [] }), context: "The user is looking at the gauge USGS 01646500." });
-  assert.equal(res.canned, false);
-  assert.match(res.answer, /320\.7738/);
-  assert.equal(eng.convs.length, 2);
-  assert.ok(eng.convs.every((c) => c.prompts.length === 1 && c.closed));
-  // Step 2 carries the question and the result, as one prompt.
-  assert.ok(eng.convs[1].prompts[0].startsWith(SUMMARY));
-  assert.match(eng.convs[1].prompts[0], /Result of analyze_station\({"source":"usgs","station_id":"01646500"}\): {"source":"usgs"/);
-});
-
 test("a step that fails is tried once more in a fresh session", async () => {
-  const eng = chromeLikeEngine([
-    '{"tool": "analyze_station", "arguments": {"source": "usgs", "station_id": "01646500"}}',
-    '{"answer": "Mean 320.7738 m3/s."}',
-  ], { failFirst: 1 });
+  const eng = chromeLikeEngine([ANALYSE, JSON.stringify({ answer: [`${P}.mean`] })], { failFirst: 1 });
   const events = [];
-  const res = await askLoop(SUMMARY, { open: () => eng.open(), callTool: async () => ({ ok: true, compact: POTOMAC }),
-    lock: async () => ({ ok: true }), onEvent: (m) => events.push(m) });
-  assert.equal(res.answer, "Mean 320.7738 m3/s.");
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...packageStub(), onEvent: (m) => events.push(m) });
+  assert.equal(res.answer, SENTENCES[`${P}.mean`]);
   assert.equal(eng.convs.length, 3);
   assert.ok(eng.convs.every((c) => c.closed));
   assert.ok(events.some((e) => /Step 1 failed \(kErrorUnknown\); trying it once more/.test(e)));
 });
 
 test("a step that fails twice after a tool ran shows the tools' facts and the reason, not an error", async () => {
-  const eng = chromeLikeEngine(['{"tool": "analyze_station", "arguments": {}}'], { failFirst: 0 });
-  // Steps after the first all fail.
+  const eng = chromeLikeEngine([ANALYSE]);
   let calls = 0;
   const open = () => {
     calls += 1;
     if (calls === 1) return eng.open();
     return { async generate() { throw new Error("kErrorUnknown"); }, close() {} };
   };
-  const res = await askLoop(SUMMARY, { open, callTool: async () => ({ ok: true, compact: POTOMAC }),
-    lock: async (answer) => ({ ok: !answer, refused: [], facts: ["usgs 01646500: discharge 1930-03-01 to 2026-10-24."], notes: [] }) });
+  const res = await askLoop(SUMMARY, { open, ...packageStub() });
   assert.equal(calls, 3);
   assert.equal(res.lock.ok, false);
   assert.match(res.stopped, /stopped at step 2, twice \(kErrorUnknown\)/);
   const html = deviceAnswerHtml({ ...res, model: "Chrome built-in (Gemini Nano)" });
   assert.match(html, /No answer: the on-device model stopped at step 2, twice \(kErrorUnknown\)\. What the tools returned:/);
-  assert.match(html, /<li>usgs 01646500: discharge 1930-03-01 to 2026-10-24\.<\/li>/);
+  assert.match(html, /<li>The mean of the daily values at POTOMAC/);
   assert.match(deviceAnswerMarkdown(SUMMARY, res), /No answer: the on-device model stopped at step 2/);
 });
 
 test("a first step that fails twice is an error the page reports, as before", async () => {
   const open = () => ({ async generate() { throw new Error("kErrorUnknown"); }, close() {} });
-  await assert.rejects(askLoop(SUMMARY, { open, callTool: async () => ({}), lock: async () => ({ ok: true }) }), /kErrorUnknown/);
-});
-
-test("the step prompt carries every result so far, not only the last", () => {
-  const p = stepPrompt("q\n\nContext: c", "q", [
-    { name: "find_stations", arguments: { query: "Kingston" }, compact: { stations: [{ station_id: "E1" }] } },
-    { name: "analyze_station", arguments: { station_id: "E1" }, compact: { mean: 1 } },
-  ]);
-  assert.match(p, /Result of find_stations/);
-  assert.match(p, /Result of analyze_station/);
-  assert.equal(stepPrompt("q\n\nContext: c", "q", []), "q\n\nContext: c");
+  await assert.rejects(askLoop(SUMMARY, { open, ...packageStub() }), /kErrorUnknown/);
 });
 
 // ── warm sessions for the one-off calls (recheck item 5) ─────────────────────
@@ -324,4 +338,83 @@ test("an analysis carries the catalogue's name and river, so two gauges can be t
   assert.equal(withCatalogueName(err, {}, byKey), err);
   const named = { ok: true, compact: { source: "usgs", station_id: "01646500", name: "Little Falls" } };
   assert.equal(withCatalogueName(named, {}, byKey).compact.name, "Little Falls");
+});
+
+// ── the fourth check (2026-10-26): a time limit, a Stop, and the right reason ─────────────────────────────────
+
+// A conversation whose prompt never replies until its signal aborts, as the 176 s prompt of the fourth check
+// ("List the gauges on the Thames near Kingston", QuotaExceededError at the end).
+function hangingEngine(before = []) {
+  const signals = [];
+  return {
+    signals,
+    open() {
+      return {
+        generate(prompt, schema, signal) {
+          if (before.length) return Promise.resolve(before.shift());
+          signals.push(signal);
+          return new Promise((_, reject) => {
+            if (signal) signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          });
+        },
+        close() {},
+      };
+    },
+  };
+}
+
+test("a prompt that hangs is ended by the step's time limit, on the facts gathered so far", async () => {
+  const eng = hangingEngine([ANALYSE]);
+  const t0 = Date.now();
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...packageStub(), stepMs: 60 });
+  assert.ok(Date.now() - t0 < 2000);
+  assert.equal(eng.signals.length, 1, "the hanging step got a signal");
+  assert.equal(eng.signals[0].aborted, true, "and it was aborted, so the device stops writing");
+  assert.match(res.stopped, /gave no reply within 0 s at step 2, so it was stopped/);
+  const html = deviceAnswerHtml({ ...res, model: "m" });
+  assert.match(html, /No answer: the on-device model gave no reply/);
+  for (const f of SUMMARY_FACTS) assert.ok(html.includes(`<li>${f.replace(/'/g, "&#39;")}</li>`), f);
+  assert.doesNotMatch(html, /Answered on your device/);
+});
+
+test("Stop ends a hanging prompt at once, with the facts gathered and one line why", async () => {
+  const eng = hangingEngine([ANALYSE]);
+  const stop = new AbortController();
+  const events = [];
+  const onEvent = (m) => { events.push(m); if (m.startsWith("Thinking… (step 2")) setTimeout(() => stop.abort(), 20); };
+  const res = await askLoop(SUMMARY, { open: () => eng.open(), ...packageStub(), onEvent, signal: stop.signal, stepMs: 60000 });
+  assert.equal(res.stopped, "you stopped it at step 2");
+  assert.equal(eng.signals[0].aborted, true);
+  assert.equal(res.results.length, 1);
+  assert.match(deviceAnswerHtml(res), /No answer: you stopped it at step 2\. What the tools returned:/);
+  // Stopped before the first step: nothing is prompted.
+  const early = await askLoop(SUMMARY, { open: () => eng.open(), ...packageStub(), signal: AbortSignal.abort() });
+  assert.equal(early.stopped, "you stopped it at step 1");
+});
+
+test("calls that were all refused say so, not 'nothing in the question to look up' (check4, Kingston)", async () => {
+  const replies = [
+    '{"tool": "find_stations", "arguments": {"query": "Kingston upon Thames", "near": [51.0, -0.3], "limit__": 5}}',
+    '{"tool": "find_stations", "arguments": {"query": "Kingston upon Thames", "limit": 5, "near": [51.47, 0.50]}}',
+  ];
+  const eng = recordingEngine([...replies]);
+  let step = 0;
+  const res = await askLoop("Find the five gauges nearest to Kingston upon Thames", {
+    open: () => eng.open(),
+    plan: async () => ({ mode: ++step <= 2 ? "tool" : "none", budget: 5, prompt: "p", schema: {} }),
+    callTool: async () => ({ ok: false, refused: "the search point is in neither your words nor a result" }),
+    render: async (reply, results, words, why) => ({ ok: false, refused: [why], facts: [], notes: [] }),
+  });
+  assert.equal(res.stopped, "all 2 of the model's calls were refused (find_stations: the search point is in neither your words nor a result)");
+  assert.doesNotMatch(deviceAnswerHtml(res), /nothing in the question|Answered on your device/);
+});
+
+test("the 'Answered on your device' header is over answers only", () => {
+  const ok = { lock: { ok: true, sentences: ["The mean is 321 m3/s."], text: "", notes: [] }, model: "m" };
+  assert.match(deviceAnswerHtml(ok), /^<div class="showcase-note">Answered on your device by m/);
+  const refused = { lock: { ok: false, refused: ["AquaScope's own check stopped the answer"], facts: ["x"], notes: [] }, model: "m" };
+  const html = deviceAnswerHtml(refused);
+  assert.doesNotMatch(html, /Answered/);
+  assert.match(html, /^<p class="ask-refused">The model&#39;s reply was refused/);
+  assert.match(html, /Ran on your device by m, with no key/);
 });

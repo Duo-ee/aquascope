@@ -163,9 +163,9 @@ test("note cards go on the side that keeps them off each other and off the map's
 });
 
 test("when the model's notes are refused, the line says so, not 'no model' (#590)", () => {
-  assert.deepEqual(explainWho({ model: "Chrome's built-in model", notes: [], refused: ["note 1: a number not in its facts (20)"] }),
-    ["Rules", "Chrome's built-in model's wording was refused"]);
+  assert.deepEqual(explainWho({ model: "Chrome's built-in model", notes: [], refused: ["the model's reply was refused: reply.notes[0].note 'f4' is not one of n1, n2"] }),
+    ["Rules", "Chrome's built-in model's choice was refused"]);
   assert.deepEqual(explainWho({ model: "Chrome's built-in model", error: "the on-device model took more than 30 s" }),
     ["Rules", "Chrome's built-in model did not answer (the on-device model took more than 30 s)"]);
-  assert.deepEqual(explainWho({ model: "claude via anthropic", notes: [] }), ["Rules", "claude via anthropic wrote no note"]);
+  assert.deepEqual(explainWho({ model: "claude via anthropic", notes: [] }), ["Rules", "claude via anthropic chose no note"]);
 });

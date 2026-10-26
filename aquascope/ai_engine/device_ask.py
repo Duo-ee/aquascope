@@ -1,26 +1,33 @@
-"""Ask on the reader's device (#590): what a small model is shown of a tool result, and the lock on its answer.
+"""Ask on the reader's device (#590): what a small model may choose, and the sentences the package writes.
 
-The Explorer's on-device Ask runs Chrome's built-in model (or WebLLM) through a short loop: the model picks a
-tool, the worker runs it, the model writes two or three sentences. Two things went wrong on the device:
+The Explorer's on-device Ask runs Chrome's built-in model (or WebLLM) through a short loop. Since round 3 of
+#590 the model picks and the package writes:
 
-* the tool result was cut at its first 3,000 characters, which ended inside the annual maxima, so the trend
-  and the flood frequency never reached the model and it guessed them ("an increasing trend" where the test
-  gives Sen's slope +0.059 m3/s per year, p = 0.82);
-* nothing checked the answer, so numbers from an earlier question, a trend never computed and gauge ids
-  swapped between sites reached the page.
+* **The model decides** which tool to run next, with which gauge id, point or search phrase, and then which
+  facts answer the question and in what order, by key, plus a few connecting sentences by id.
+* **The model cannot** write anything the reader sees: no number, date, id, unit, place or claim. Each step's
+  reply is held to a schema of enums built here (:func:`step_schema`): the tools still open, the gauge ids,
+  sources and search phrases the reader's words or an earlier result hold, the keys of :func:`fact_table`.
+  :func:`check_call` refuses a call outside them and does not run a repeat; :func:`render_answer` writes the
+  answer from the keys, each sentence naming its gauge, label, value, unit and method, and refuses anything else
+  before display, so the page shows the facts with one short line saying why.
 
-:func:`compact_result` is what the model is shown instead: the record, the statistics, the flow-duration
-points, the return levels and the trend with its reading in words, and no series. :func:`lock_answer` holds
-the answer to this question's compact results, the way the map roles' locks hold theirs: every number, date
-and gauge id must be in them (rounding allowed), every trend or significance word must agree with the test.
-When it refuses, :func:`facts` is what the page shows instead, with a short line saying why.
+Why: three checks on the device held the model's free text to the results with patterns, and each round the
+model found a new way past them ("significant trend in annual maxima with a p = 0.0689" where the test says
+not significant) while the patterns refused right answers ("100-year" read as a gauge id).
 
-Internal: only the Explorer's worker imports this module.
+:func:`compact_result` is what a tool result is cut down to: the record, the statistics, the flow-duration
+points, the return levels and the trend, and no series. :func:`lock_answer`, the free-text lock of rounds 1
+and 2, stays as a second line of defence on the package's own sentences.
+
+Internal: only the Explorer's worker imports this module. The reader's own key runs the full Analyst
+(:mod:`aquascope.ai_engine.analyst`), not this loop.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -236,90 +243,38 @@ def compact_result(name: str, payload: Any) -> dict[str, Any]:
     return out
 
 
-# ── the facts the page shows when the model's wording is refused ──────────────
+# ── the facts the page shows when no answer can be written ──────────────────
 
 
 def _fmt(x: Any) -> str:
-    if isinstance(x, float):
-        return f"{x:,.4g}" if abs(x) < 1e5 else f"{x:,.0f}"
-    return str(x)
-
-
-def _analysis_lines(c: dict[str, Any], label: str = "") -> list[str]:
-    unit = c.get("unit") or ""
-    who = label or " ".join(str(c[k]) for k in ("name", "source", "station_id") if c.get(k)) or "The record"
-    lines = []
-    if c.get("error"):
-        return [f"{who}: {c['error']}"]
-    span = f"{c['start']} to {c['end']}" if c.get("start") and c.get("end") else ""
-    daily = c.get("daily_values") or {}
-    bits = [f"{k} {_fmt(daily[k])} {unit}".strip() for k in ("mean", "min", "max") if daily.get(k) is not None]
-    lines.append(f"{who}: {c.get('variable') or 'record'} {span}".strip()
-                 + (f"; daily values {', '.join(bits)}" if bits else "") + ".")
-    fd = c.get("flow_duration") or {}
-    if fd:
-        pts = [f"{k.upper()} {_fmt(fd[k])} {unit}".strip() for k in ("q95", "q50", "q10") if k in fd]
-        lines.append(f"Flow duration: {', '.join(pts)}.")
-    ff = c.get("flood_frequency") or {}
-    rows = {r.get("T_years"): r for r in ff.get("return_levels") or []}
-    for t in (100, 10, 2):
-        r = rows.get(t)
-        if r and r.get("gev") is not None:
-            ci = r.get("lp3_90ci")
-            ci_txt = f" (LP3 90 % interval {_fmt(ci[0])} to {_fmt(ci[1])})" if ci else ""
-            lines.append(f"{t}-year flood (GEV): {_fmt(r['gev'])} {unit}{ci_txt}.")
-            break
-    for key in ("trend_annual_mean", "trend_annual_max"):
-        t = c.get(key)
-        if isinstance(t, dict) and t.get("reading"):
-            lines.append(f"Trend: {t['reading']}.")
-    return lines
+    return display(x)
 
 
 def facts(name: str, compact: Any) -> list[str]:
-    """Plain lines from one compact result, built by code: what the page shows instead of a refused answer."""
+    """Plain lines from one compact result, written here: what the page shows when the model picks nothing
+    it may (the summary keys of :func:`fact_table`)."""
     if not isinstance(compact, dict):
         return []
     if compact.get("error"):
         return [f"{name} failed: {compact['error']}"]
-    if name in _ANALYSIS_TOOLS:
-        return _analysis_lines(compact)
-    if name == "find_stations":
-        rows = compact.get("stations") or []
-        if not rows:
-            return ["The catalogue search found no gauges."]
-        return [f"{r.get('name') or r.get('station_id')} ({r.get('source')} {r.get('station_id')})"
-                + (f", {r['river']}" if r.get("river") else "")
-                + (f", {_fmt(r['latitude'])}, {_fmt(r['longitude'])}" if r.get("latitude") is not None else "")
-                for r in rows[:6]]
-    if name == "anywhere":
-        lines = []
-        cl = compact.get("climate") or {}
-        if cl:
-            bits = []
-            if cl.get("precipitation_mm_per_year") is not None:
-                bits.append(f"rainfall {_fmt(cl['precipitation_mm_per_year'])} mm a year")
-            if cl.get("temperature_mean_c") is not None:
-                bits.append(f"mean temperature {_fmt(cl['temperature_mean_c'])} °C")
-            if cl.get("aridity_index") is not None:
-                bits.append(f"aridity index {_fmt(cl['aridity_index'])}"
-                            + (f" ({cl['aridity_class']})" if cl.get("aridity_class") else ""))
-            lines.append(f"Climate at {compact.get('latitude')}, {compact.get('longitude')} "
-                         f"({cl.get('source', 'ERA5')}): {', '.join(bits)}.")
-        if isinstance(compact.get("glofas"), dict):
-            lines += _analysis_lines(compact["glofas"], label="GloFAS (modelled)")
+    table = fact_table([{"name": name, "arguments": {}, "compact": compact}])
+    lines = _write([f for f in table["facts"] if f.get("default")], table["gauges"])
+    if lines or name in _ANALYSIS_TOOLS or name in ("find_stations", "anywhere", "describe_catchment"):
         return lines
     flat = []
     for k, v in compact.items():
         if isinstance(v, (str, int, float)) and not isinstance(v, bool):
-            flat.append(f"{k.replace('_', ' ')}: {_fmt(v)}")
+            flat.append(f"{k.replace('_', ' ')}: {display(v)}")
     return flat[:6]
 
 
 # ── the lock ───────────────────────────────────────────────────────────────────
 
 #: A gauge id with letters and digits ("E02102A", "3400TH"); pure digit ids are numbers and checked as numbers.
-_ALNUM_ID = re.compile(r"\b(?=[A-Za-z0-9_-]*[A-Za-z])(?=(?:[A-Za-z_-]*\d){3})[A-Za-z0-9][A-Za-z0-9_-]{4,}\b")
+#: "100-year" and "7-day" are a period, not an id (check3: "the id 100-year is in no result" refused two right
+#: summaries).
+_ALNUM_ID = re.compile(r"\b(?!\d+-[A-Za-z]+\b)(?=[A-Za-z0-9_-]*[A-Za-z])(?=(?:[A-Za-z_-]*\d){3})"
+                       r"[A-Za-z0-9][A-Za-z0-9_-]{4,}\b")
 _Q_LABEL = re.compile(r"\bQ ?(\d{1,2})\b", re.I)
 _LIST_MARK = re.compile(r"(?m)^\s*(?:\d{1,2}[.)]|[-*•])\s+")
 
@@ -426,6 +381,10 @@ def _trend_check(answer: str, compacts: list[tuple[str, dict[str, Any]]]) -> lis
                 if isinstance(holder.get(key), dict) and key not in tests:
                     tests[key] = holder[key]
     refused = []
+    # The package's own connective sentences say how a trend is tested ("a p-value below 0.05 is called
+    # significant"), never what a test found: they are no claim to hold (check4 refused a right answer for it).
+    for line in CONNECTIVES.values():
+        answer = answer.replace(normalise(line), " ")
     for sentence in _SENTENCE.split(answer):
         if not _TREND_TOPIC.search(sentence):
             continue
@@ -498,6 +457,10 @@ _PERIODS = (
     re.compile(r"\breturn period (?:of |is |= ?)?(?:about |around )?(\d{1,4}) ?(?:years?|yrs?)\b", re.I),
     re.compile(r"\breturn period\b[^.;\n]*?\bis (\d{1,4}) ?(?:years?|yrs?)\b", re.I),
 )
+#: After a number: a rate per year (Sen's slope), not a flow.
+_RATE = re.compile(r"\s*(?:m3/s(?:ec)?|m3 ?s-1|cumecs)?\s*(?:per year|a year|/ ?yr|/ ?year)\b", re.I)
+#: Before a label in its clause: the number that follows is a test's, not the label's.
+_TEST_WORDS = re.compile(r"p[- ]?values?|\bp\s*=|\bslope|\btau\b|mann|kendall", re.I)
 _LP3 = re.compile(r"\b(?:lp3|lp-3|lp ?iii|log[- ]?pearson)", re.I)
 _GEV = re.compile(r"\bgev\b|generali[sz]ed extreme", re.I)
 _DATE_RANGE = re.compile(r"(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|-|and)\s*(\d{4}-\d{2}-\d{2})", re.I)
@@ -644,6 +607,10 @@ def _label_check(text: str, compacts: list[tuple[str, dict[str, Any]]], words: s
                 for m in re.finditer(r"(?<![\w])" + re.escape(sid) + r"(?![\w])", low)]
     numbers = [(a, b, v) for a, b, v in numbers
                if v is not None and not any(x <= a < y for x, y in id_spans)]
+    # "-0.0365 m3/s per year" is a Sen's slope, a rate: not a flow, and no label's value (check3: it was read as the
+    # daily mean and a right trend answer refused).
+    rates = {a for a, b, _ in numbers if _RATE.match(blank, b)}
+    numbers = [n for n in numbers if n[0] not in rates]
     flows = {a for a, b, _ in numbers if _FLOW_UNIT.match(blank, b)}
 
     # A number written as a flow must be a flow in the results (or the reader's own): "2 m3/s" where 2 is a
@@ -680,6 +647,9 @@ def _label_check(text: str, compacts: list[tuple[str, dict[str, Any]]], words: s
         filler = blank[le:a]
         if a not in flows and (_OTHER_UNIT.match(blank, b) or not _CONNECTIVE.fullmatch(filler)):
             continue
+        cstart, _ = who.clause(ls)
+        if a not in flows and _TEST_WORDS.search(blank[cstart:ls]):
+            continue   # "the p-value for the annual mean is 0.953": the test's number, not the mean
         i = who.at(a)
         cands = [i] if i is not None else list(range(len(gauges)))
         have = [k for k in cands if gauges[k]["values"].get(kind)]
@@ -884,3 +854,655 @@ def lock_answer(answer: str, results: list[dict[str, Any]], words: str = "") -> 
                              "not give it, so 'nearest' is nearest to that point.")
     lines = [line for name, c in compacts for line in facts(name, c)]
     return {"ok": not refused, "refused": list(dict.fromkeys(refused))[:6], "facts": lines[:12], "notes": notes}
+
+
+# ── round 3: the model picks, the code writes (#590) ──────────────────────────
+#
+# Three on-device checks held the model's free text to the results with patterns, and each round's locks caught
+# the last round's errors while Gemini Nano found new ones ("significant trend in annual maxima with a p =
+# 0.0689", "100-year" read as a gauge id). So the model no longer writes the answer. Each step's reply is one of
+# two shapes, held by a responseConstraint schema whose values are enums built here from this question:
+#
+# * ``{"tool": <name>, "arguments": {...}}``: a tool from :data:`DEVICE_TOOLS`, with a gauge id, a source, a
+#   search phrase or a point that the reader's words or an earlier result hold (:func:`check_call` refuses any
+#   other, and a call already made is not run again);
+# * ``{"answer": [<fact key>, ...]}``: keys of :func:`fact_table`, the sentences this module writes from the
+#   compact results ("USGS-01646500.fdc.q95", "USGS-01646500.gev.100", "USGS-01646500.trend.mean"), plus a few
+#   connective sentences by id (:data:`CONNECTIVES`).
+#
+# :func:`render_answer` writes the answer from the keys. Every sentence names its gauge, label, value, unit and
+# method, and a trend is this module's own reading of the test. Nothing the model writes reaches the page.
+
+#: The tools the device may call, and the arguments each takes.
+DEVICE_TOOLS: dict[str, tuple[str, ...]] = {
+    "find_stations": ("query", "near", "limit"),
+    "analyze_station": ("source", "station_id"),
+    "anywhere": ("lat", "lon"),
+    "describe_catchment": ("lat", "lon"),
+}
+
+#: Sentences the model may add between facts, by id. Each says how the facts were made, never what they show.
+CONNECTIVES: dict[str, str] = {
+    "say.daily": "Mean, median, lowest and highest are of the daily values.",
+    "say.floods": "Flood figures are fitted to the annual maxima: GEV by L-moments, and LP3 (Log-Pearson III) "
+                  "with its 90 % interval.",
+    "say.trend": "Trends are Mann-Kendall tests on the annual series with Sen's slope; a p-value below 0.05 is "
+                 "called significant.",
+    "say.modelled": "GloFAS discharge is modelled by a global model, not measured at a gauge.",
+}
+
+#: The most facts one answer may pick.
+MAX_PICKS = 10
+
+
+def display(x: Any) -> str:
+    """A number as the Explorer shows it: whole with commas from 100 up, else three significant figures, never
+    in exponent form (11247.39 is "11,247", 0.0365 is "0.0365"; the old fact lines said "1.125e+04")."""
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return str(x)
+    v = float(x)
+    if v != v or v in (float("inf"), float("-inf")):
+        return "unknown"
+    if abs(v) >= 100:
+        return f"{v:,.0f}"
+    if v == 0:
+        return "0"
+    decimals = max(0, 2 - int(math.floor(math.log10(abs(v)))))
+    out = f"{round(v, decimals):.{decimals}f}"
+    return out.rstrip("0").rstrip(".") if "." in out else out
+
+
+def coord(x: Any) -> str:
+    """A latitude or longitude as written: up to four decimals, no trailing zeros (121.55, not "122")."""
+    try:
+        return f"{round(float(x), 4):g}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def _p_text(p: float) -> str:
+    return "p < 0.001" if p < 0.001 else f"p = {display(p)}"
+
+
+def _unit_text(unit: str) -> str:
+    return f" {unit}" if unit else ""
+
+
+def _point_key(lat: Any, lon: Any) -> str:
+    return f"{float(lat):g},{float(lon):g}"
+
+
+def _gauge_names(c: dict[str, Any], label: str | None = None) -> tuple[str, str]:
+    """The long and short names of a record: "POTOMAC ... (usgs USGS-01646500)" first, then "USGS-01646500"."""
+    if label:
+        return label, label
+    sid = str(c.get("station_id") or "")
+    name = str(c.get("name") or "")
+    src = str(c.get("source") or "")
+    if name and sid:
+        return f"{name} ({src + ' ' if src else ''}{sid})", sid
+    return (name or sid or "the record"), (sid or name or "the record")
+
+
+def _analysis_facts(c: dict[str, Any], prefix: str, gauge: str, *, modelled: bool = False) -> list[dict[str, Any]]:
+    """The sentences for one analysis, each with its key, the gauge it names and whether the page's summary
+    (shown when no answer is picked) includes it."""
+    u = str(c.get("unit") or "")
+    out: list[dict[str, Any]] = []
+
+    def add(key: str, text: str, default: bool = False) -> None:
+        out.append({"key": f"{prefix}.{key}", "gauge": gauge, "text": text, "default": default})
+
+    if c.get("error"):
+        add("error", "{who}: the tool failed (" + str(c["error"]) + ").", True)
+        return out
+    var = str(c.get("variable") or ("modelled discharge" if modelled else "record"))
+    if c.get("start") and c.get("end"):
+        years = f", {display(c['years'])} years" if isinstance(c.get("years"), (int, float)) else ""
+        add("record", f"{{who}}: {var} from {c['start']} to {c['end']}{years}.", True)
+    daily = c.get("daily_values") or {}
+    words = {"mean": "The mean of the daily values", "median": "The median of the daily values",
+             "min": "The lowest daily value", "max": "The highest daily value"}
+    for k in ("mean", "median", "min", "max"):
+        if isinstance(daily.get(k), (int, float)):
+            add(k, f"{words[k]} at {{who}} is {display(daily[k])}{_unit_text(u)}.", k == "mean")
+    fd = c.get("flow_duration") or {}
+    share = {"q95": "95 % of the time", "q50": "half the time", "q10": "10 % of the time"}
+    for k in ("q95", "q50", "q10"):
+        if isinstance(fd.get(k), (int, float)):
+            add(f"fdc.{k}", f"{k.upper()} at {{who}} is {display(fd[k])}{_unit_text(u)}, the flow exceeded "
+                            f"{share[k]} (flow-duration curve).", k == "q95")
+    ff = c.get("flood_frequency") or {}
+    n = ff.get("n_years")
+    of_n = f" to {n} annual maxima" if isinstance(n, (int, float)) else ""
+    for r in ff.get("return_levels") or []:
+        if not isinstance(r, dict) or not isinstance(r.get("T_years"), (int, float)):
+            continue
+        t = display(r["T_years"])
+        if isinstance(r.get("gev"), (int, float)):
+            add(f"gev.{t}", f"The {t}-year flood at {{who}} is {display(r['gev'])}{_unit_text(u)} "
+                            f"(GEV fitted by L-moments{of_n}).", t == "100")
+        if isinstance(r.get("lp3"), (int, float)):
+            ci = r.get("lp3_90ci") if isinstance(r.get("lp3_90ci"), list) and len(r["lp3_90ci"]) == 2 else None
+            ci_txt = f", 90 % interval {display(ci[0])} to {display(ci[1])}{_unit_text(u)}" if ci else ""
+            fitted = f", fitted{of_n}" if of_n else ""
+            add(f"lp3.{t}", f"The {t}-year flood at {{who}} is {display(r['lp3'])}{_unit_text(u)} by Log-Pearson "
+                            f"III (LP3{fitted}){ci_txt}.")
+    rec = ff.get("record_max") or {}
+    if isinstance(rec.get("value"), (int, float)):
+        year = f", in {rec['year']}" if rec.get("year") is not None else ""
+        add("amax", f"The largest annual maximum at {{who}} is {display(rec['value'])}{_unit_text(u)}{year}.")
+    for key, short in (("trend_annual_mean", "trend.mean"), ("trend_annual_max", "trend.max")):
+        t = c.get(key)
+        if isinstance(t, dict) and isinstance(t.get("p_value"), (int, float)):
+            add(short, "At {who} there is " + _reading(t, u) + ".", True)
+    return out
+
+
+def _reading(t: dict[str, Any], unit: str) -> str:
+    """The test's verdict in words, from its own p-value and slope: the only trend wording the page shows."""
+    p = float(t["p_value"])
+    on = t.get("on") or "the series"
+    slope = t.get("sens_slope_per_year")
+    slope_txt = f"; Sen's slope {display(slope)}{_unit_text(unit)} per year" if isinstance(slope, (int, float)) else ""
+    if p < _P_SIGNIFICANT:
+        direction = t.get("direction") or ("increasing" if isinstance(slope, (int, float)) and slope > 0
+                                           else "decreasing")
+        return f"a significant {direction} trend in the {on} (Mann-Kendall {_p_text(p)}{slope_txt})"
+    return f"no significant trend in the {on} (Mann-Kendall {_p_text(p)}{slope_txt})"
+
+
+def _climate_facts(c: dict[str, Any], key: str, where: str) -> list[dict[str, Any]]:
+    cl = c.get("climate") or {}
+    src = cl.get("source") or "ERA5"
+    span = f", {c['start']} to {c['end']}" if c.get("start") and c.get("end") else ""
+    rows = []
+    for field, k, text in (
+        ("precipitation_mm_per_year", "rain", "Mean rainfall at {w} is {v} mm a year"),
+        ("et0_mm_per_year", "et0", "Reference evapotranspiration at {w} is {v} mm a year"),
+        ("temperature_mean_c", "temp", "Mean air temperature at {w} is {v} °C"),
+        ("wettest_day_mm", "wettest", "The wettest day at {w} had {v} mm"),
+    ):
+        if isinstance(cl.get(field), (int, float)):
+            rows.append({"key": f"{key}.{k}", "gauge": None, "default": k in ("rain", "temp"),
+                         "text": text.format(w=where, v=display(cl[field])) + f" ({src}{span})."})
+    if isinstance(cl.get("aridity_index"), (int, float)):
+        cls = f" ({cl['aridity_class']})" if cl.get("aridity_class") else ""
+        rows.append({"key": f"{key}.aridity", "gauge": None, "default": True,
+                     "text": f"The aridity index at {where} is {display(cl['aridity_index'])}{cls} ({src})."})
+    return rows
+
+
+def _catchment_facts(c: dict[str, Any], key: str, where: str) -> list[dict[str, Any]]:
+    attrs = c.get("attributes") if isinstance(c.get("attributes"), dict) else {}
+    rows = []
+    if isinstance(attrs.get("area_km2"), (int, float)):
+        rows.append({"key": f"{key}.area", "gauge": None, "default": True,
+                     "text": f"The catchment upstream of {where} covers {display(attrs['area_km2'])} km2 "
+                             "(BasinATLAS)."})
+    for field, entry in attrs.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("value"), (int, float)) or not entry.get("label"):
+            continue
+        unit = str(entry.get("unit") or "")
+        rows.append({"key": f"{key}.{field}", "gauge": None, "default": False,
+                     "text": f"The {entry['label']} of the catchment of {where} is {display(entry['value'])}"
+                             f"{_unit_text(unit)} (BasinATLAS)."})
+    return rows
+
+
+def _search_facts(c: dict[str, Any], args: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    rows = [r for r in c.get("stations") or [] if isinstance(r, dict)]
+    near = args.get("near") if isinstance(args.get("near"), (list, tuple)) and len(args["near"]) == 2 else None
+    if near:
+        how = f"near {coord(near[0])}, {coord(near[1])}, nearest first"
+    elif args.get("query"):
+        how = f"for “{args['query']}”"
+    else:
+        how = ""
+    n = c.get("n_returned") if isinstance(c.get("n_returned"), int) else len(rows)
+    count = "no gauges" if not n else ("1 gauge" if n == 1 else f"{n} gauges")
+    if n and n > len(rows):
+        count += f"; the first {len(rows)} are listed"
+    out = [{"key": f"{key}.count", "gauge": None, "default": True,
+            "text": f"The catalogue search {how} returned {count}.".replace("search  ", "search ")}]
+    for r in rows:
+        sid = r.get("station_id")
+        if not sid:
+            continue
+        bits = [f"{r.get('name') or sid} ({r.get('source')} {sid})"]
+        if r.get("river"):
+            river = str(r["river"])
+            bits.append(f"on {river}" if river.lower().startswith("the ") else f"on the {river}")
+        if isinstance(r.get("latitude"), (int, float)) and isinstance(r.get("longitude"), (int, float)):
+            bits.append(f"at {coord(r['latitude'])}, {coord(r['longitude'])}")
+        if r.get("period_start") and r.get("period_end"):
+            bits.append(f"record {r['period_start']} to {r['period_end']}")
+        out.append({"key": f"{sid}.where", "gauge": None, "default": True, "text": ", ".join(bits) + "."})
+    return out
+
+
+def fact_table(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Every sentence this question's results allow, by key: ``{"facts": [{key, gauge, text, default}],
+    "gauges": {gauge: [long name, short name]}}``.
+
+    ``text`` holds ``{who}`` where the gauge's name goes: its long name the first time an answer names it, its
+    id after that. ``default`` marks the summary the page shows when the model picks nothing it may.
+    """
+    facts_out: list[dict[str, Any]] = []
+    gauges: dict[str, list[str]] = {}
+    searches = 0
+    for r in results or []:
+        if not isinstance(r, dict) or not isinstance(r.get("compact"), dict):
+            continue
+        name, c, args = str(r.get("name")), r["compact"], r.get("arguments") or {}
+        if name in _ANALYSIS_TOOLS:
+            prefix = str(c.get("station_id") or args.get("station_id") or f"record{len(gauges) + 1}")
+            if prefix not in gauges:
+                gauges[prefix] = list(_gauge_names(c))
+            facts_out += _analysis_facts(c, prefix, prefix)
+        elif name == "anywhere" and not c.get("error"):
+            lat, lon = c.get("latitude", args.get("lat")), c.get("longitude", args.get("lon"))
+            if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))):
+                continue
+            pk = _point_key(lat, lon)
+            where = f"{coord(lat)}, {coord(lon)}"
+            facts_out += _climate_facts(c, f"climate@{pk}", where)
+            if isinstance(c.get("glofas"), dict) and not c["glofas"].get("error"):
+                gk = f"glofas@{pk}"
+                label = f"the GloFAS cell at {where} (modelled)"
+                gauges[gk] = [label, label]
+                facts_out += _analysis_facts(c["glofas"], gk, gk, modelled=True)
+        elif name == "describe_catchment" and not c.get("error"):
+            lat, lon = c.get("latitude", args.get("lat")), c.get("longitude", args.get("lon"))
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                facts_out += _catchment_facts(c, f"catchment@{_point_key(lat, lon)}",
+                                              f"{coord(lat)}, {coord(lon)}")
+        elif name == "find_stations" and not c.get("error"):
+            searches += 1
+            facts_out += _search_facts(c, args, "search" if searches == 1 else f"search{searches}")
+    seen: set[str] = set()
+    unique = []
+    for f in facts_out:
+        if f["key"] not in seen:
+            seen.add(f["key"])
+            unique.append(f)
+    return {"facts": unique, "gauges": gauges}
+
+
+def _write(picked: list[dict[str, Any]], gauges: dict[str, list[str]], *, short: bool = False) -> list[str]:
+    named: set[str] = set(gauges) if short else set()
+    lines = []
+    for f in picked:
+        g = f.get("gauge")
+        who = ""
+        if g:
+            long, short = gauges.get(g, [g, g])
+            who = short if g in named else long
+            named.add(g)
+        line = f["text"].replace("{who}", who)
+        lines.append(line[:1].upper() + line[1:])
+    return lines
+
+
+# ── what the model may pass to a tool ─────────────────────────────────────────
+
+_COORD_PAIR = re.compile(r"(?<![\w.])(-?\d{1,2}(?:\.\d+)?)\s*°?\s*[NS]?\s*,\s*(-?\d{1,3}(?:\.\d+)?)(?![\w.])")
+_CTX_GAUGE = re.compile(r"source (?P<src>[\w-]+), id (?P<id>[^,\s)]+)")
+_SLASH_GAUGE = re.compile(r"\((?P<src>[a-z][\w-]*) ?/ ?(?P<id>[^)\s]+)\)", re.I)
+#: A gauge id in the reader's own words: letters and digits mixed ("E02102A", "USGS-01646500"), or six digits
+#: or more. "100-year", "100yr", "1930s", "7-day" and dates are not ids.
+_WORD_ID = re.compile(r"(?<![\w-])(?!\d+-[A-Za-z]+\b)(?!\d+(?:yrs?|years?|s|th|st|nd|rd|km2?|mm|cm|m3s?)\b)"
+                      r"(?:[A-Za-z][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*|"
+                      r"\d+[A-Za-z][A-Za-z0-9_-]*|\d{6,})(?![\w-])")
+_STOP = frozenset("""a an and are as at be by can do does find for from gauge gauges give has have how i in is it its
+me my near nearest of on or show station stations tell than that the their there these this to us was what
+when where which with you your five four three two six seven eight nine ten summarise summarize compare record
+flow flows mean median river rivers flood floods discharge rain rainfall trend trends climate catchment water level
+levels low high year years period frequency peak peaks drier wetter dry wet getting bigger smaller annual daily
+modelled list use using please name get check describe explain why will would should could did had""".split())
+#: Where a search phrase stops: punctuation, and anything that is not a word of letters (a number, an id's digits).
+_PHRASE_BREAK = re.compile(r"[^A-Za-z'\s-]+|\s-+\s")
+
+
+def _question(words: str) -> str:
+    return (words or "").split("\n\nContext:")[0]
+
+
+def _known(results: list[dict[str, Any]], words: str) -> dict[str, Any]:
+    """What the model may name in a call: gauges (id -> source or None), points, and search phrases."""
+    gauges: dict[str, str | None] = {}
+    points: list[tuple[float, float]] = []
+    text = normalise(words or "")
+    for m in _CTX_GAUGE.finditer(text):
+        gauges.setdefault(m.group("id"), m.group("src"))
+    for m in _SLASH_GAUGE.finditer(text):
+        gauges.setdefault(m.group("id"), m.group("src"))
+    for m in _WORD_ID.finditer(_DATE.sub(" ", _question(text))):
+        if len(m.group(0)) >= 5 and sum(ch.isdigit() for ch in m.group(0)) >= 3:
+            gauges.setdefault(m.group(0), None)
+    for m in _COORD_PAIR.finditer(text):
+        if re.search(r"centred on\s*$|centered on\s*$", text[max(0, m.start() - 14):m.start()]):
+            continue   # the map's centre is where the view is, not a place the reader asked about
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            points.append((lat, lon))
+    for r in results or []:
+        c = r.get("compact") if isinstance(r, dict) else None
+        if not isinstance(c, dict):
+            continue
+        rows = c.get("stations") if r.get("name") == "find_stations" else [c]
+        for row in rows or []:
+            if isinstance(row, dict) and row.get("station_id"):
+                gauges[str(row["station_id"])] = str(row.get("source") or "") or gauges.get(str(row["station_id"]))
+            if isinstance(row, dict) and isinstance(row.get("latitude"), (int, float)) \
+                    and isinstance(row.get("longitude"), (int, float)):
+                points.append((float(row["latitude"]), float(row["longitude"])))
+    # Search phrases: runs of the question's words, names first ("Kingston upon Thames", "Kingston", "Thames");
+    # all of them only when the question names nothing with a capital and no gauge is known yet. A run never
+    # crosses punctuation, a gauge id or a number, so an id's letters are no phrase (check4 offered "USGS-" and
+    # "Potomac USGS-"), and an opening verb is a stop word, not a name ("List", "Use").
+    phrases: list[str] = []
+    for named in ((True,) if gauges else (True, False)):
+        for chunk in _PHRASE_BREAK.split(_WORD_ID.sub(" , ", _DATE.sub(" , ", _question(text)))):
+            q = [w.strip("'-") for w in chunk.split() if w.strip("'-")]
+            for n in (4, 3, 2, 1):
+                for i in range(len(q) - n + 1):
+                    span = q[i:i + n]
+                    if span[0].lower() in _STOP or span[-1].lower() in _STOP or len(" ".join(span)) < 3:
+                        continue
+                    if named and not (span[0][0].isupper() and span[-1][0].isupper()):
+                        continue
+                    p = " ".join(span)
+                    if p not in phrases:
+                        phrases.append(p)
+        if phrases:
+            break
+    analysed = {str(r["compact"].get("station_id")).lower() for r in results or []
+                if isinstance(r, dict) and r.get("name") in _ANALYSIS_TOOLS and isinstance(r.get("compact"), dict)
+                and r["compact"].get("station_id")}
+    analysed |= {str((r.get("arguments") or {}).get("station_id")).lower() for r in results or []
+                 if isinstance(r, dict) and r.get("name") == "analyze_station"}
+    return {"gauges": gauges, "points": list(dict.fromkeys(points)), "phrases": phrases[:40],
+            "analysed": analysed}
+
+
+def _same_point(a: tuple[float, float], points: list[tuple[float, float]]) -> tuple[float, float] | None:
+    return next((p for p in points if abs(p[0] - a[0]) <= 0.01 and abs(p[1] - a[1]) <= 0.01), None)
+
+
+def _call_key(name: str, args: dict[str, Any]) -> str:
+    return json.dumps([name, {k: args[k] for k in sorted(args)}], default=str)
+
+
+def check_call(reply: Any, results: list[dict[str, Any]], words: str = "") -> dict[str, Any]:
+    """Hold a tool call to this question: ``{"ok", "name", "arguments", "refused", "repeat"}``.
+
+    The tool must be one of :data:`DEVICE_TOOLS`; a gauge id must be in the reader's words, the context line
+    or an earlier result (its source is then the one that names it, not the model's); a point must be a pair
+    the words or a result give; a search phrase must be the reader's own words. Other arguments are dropped.
+    A call already made for this question (``repeat``) is not run again: the next step answers from what the
+    results hold (#590: "analyze_station" three times with the same arguments, then no answer).
+    """
+    if not isinstance(reply, dict):
+        return {"ok": False, "refused": "the reply was not a tool call"}
+    name = reply.get("tool")
+    if name not in DEVICE_TOOLS:
+        return {"ok": False, "refused": f"{str(name)[:40]!r} is not one of the tools ({', '.join(DEVICE_TOOLS)})"}
+    raw = reply.get("arguments") if isinstance(reply.get("arguments"), dict) else {}
+    known = _known(results, words)
+    args: dict[str, Any] = {}
+    if name == "analyze_station":
+        sid = str(raw.get("station_id") or "").strip()
+        match = next((g for g in known["gauges"] if g.lower() == sid.lower()), None)
+        if not match:
+            return {"ok": False, "name": name, "refused": f"the gauge id {sid[:40]!r} is in neither your words nor "
+                                                          "a result; search for the gauge first"}
+        source = known["gauges"][match] or str(raw.get("source") or "").strip()
+        if not source:
+            return {"ok": False, "name": name, "refused": f"no source is known for {match}"}
+        args = {"source": source, "station_id": match}
+    elif name in ("anywhere", "describe_catchment"):
+        try:
+            pt = (float(raw.get("lat")), float(raw.get("lon")))
+        except (TypeError, ValueError):
+            return {"ok": False, "name": name, "refused": f"{name} needs lat and lon"}
+        hit = _same_point(pt, known["points"])
+        if not hit:
+            return {"ok": False, "name": name, "refused": f"{coord(pt[0])}, {coord(pt[1])} is in neither your "
+                                                          "words nor a result"}
+        args = {"lat": hit[0], "lon": hit[1]}
+    else:   # find_stations
+        query = str(raw.get("query") or "").strip()
+        near = raw.get("near")
+        if query:
+            if not any(p.lower() == query.lower() for p in known["phrases"]) and \
+                    not re.search(r"(?<![\w])" + re.escape(query.lower()) + r"(?![\w])", _question(words).lower()):
+                return {"ok": False, "name": name, "refused": f"the search {query[:40]!r} is not in your words"}
+            args["query"] = query
+        if isinstance(near, (list, tuple)) and len(near) == 2:
+            try:
+                hit = _same_point((float(near[0]), float(near[1])), known["points"])
+            except (TypeError, ValueError):
+                hit = None
+            if not hit:
+                return {"ok": False, "name": name, "refused": "the search point is in neither your words nor a result"}
+            args["near"] = [hit[0], hit[1]]
+        if not args:
+            return {"ok": False, "name": name, "refused": "a search needs words from the question or a point"}
+        try:
+            limit = int(raw.get("limit") or 5)
+        except (TypeError, ValueError):
+            limit = 5
+        args["limit"] = max(1, min(10, limit))
+    key = _call_key(name, args)
+    if any(_call_key(str(r.get("name")), r.get("arguments") or {}) == key for r in results or []
+           if isinstance(r, dict)):
+        return {"ok": False, "repeat": True, "name": name, "arguments": args,
+                "refused": f"{name} already ran with these arguments; its result is in the facts"}
+    return {"ok": True, "name": name, "arguments": args}
+
+
+# ── each step: what the model may reply ───────────────────────────────────────
+
+_COMPARE = re.compile(r"\b(?:compare[ds]?|comparing|comparison|versus|vs\.?|than|both|each|difference between)\b",
+                      re.I)
+
+
+def step_budget(words: str) -> int:
+    """How many replies a question gets. One gauge or one place (a summary, a trend, a flood): a tool, the
+    answer and one spare, 3. A comparison or a list: a search, two analyses, the answer and one spare, 5. The
+    last reply may only be an answer, so a question never ends on a tool call (#590: 5 of 14 did)."""
+    q = _question(words)
+    return 5 if wanted_list(q) >= 2 or _COMPARE.search(q) else 3
+
+
+def _tools_open(results: list[dict[str, Any]], known: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The tools a step may still call, each with the values it may take; a call already made is not offered."""
+    done = {_call_key(str(r.get("name")), r.get("arguments") or {}) for r in results or [] if isinstance(r, dict)}
+    out: dict[str, dict[str, Any]] = {}
+    ids = [g for g in known["gauges"] if g.lower() not in known["analysed"]]
+    if ids:
+        out["analyze_station"] = {"station_id": ids}
+    for tool in ("anywhere", "describe_catchment"):
+        pts = [p for p in known["points"] if _call_key(tool, {"lat": p[0], "lon": p[1]}) not in done]
+        if pts:
+            out[tool] = {"points": pts}
+    if known["phrases"] or known["points"]:
+        out["find_stations"] = {"query": known["phrases"], "points": known["points"]}
+    return out
+
+
+def _arguments_schema(tools: dict[str, dict[str, Any]], known: dict[str, Any]) -> dict[str, Any]:
+    """The ``arguments`` a step's tool call may hold: closed, and only the arguments the open tools take
+    (:data:`DEVICE_TOOLS`), each an enum of what this question gives. A point is never a free number: ``lat``,
+    ``lon`` and ``near`` take only the coordinates of the points the words or the results name, and are left out
+    when there are none. ``limit`` is a whole number from 1 to 10, as an enum.
+
+    The fourth check (2026-10-26) found the open object used: made-up search points ([51.0, -0.3], [51.47, 0.5]),
+    extra keys ("limit__", "limittypicode"), and a number written for 176 s until Chrome's output limit. One flat
+    object for every open tool, which a small model follows better than a ``oneOf`` and Chrome accepts as it
+    accepted the others; :func:`check_call` then keeps only the arguments of the tool named, and holds a point
+    to a pair the words or results give.
+    """
+    props: dict[str, Any] = {}
+    ids = list(tools.get("analyze_station", {}).get("station_id", []))
+    if ids:
+        props["station_id"] = {"type": "string", "enum": ids}
+        sources = sorted({s for s in known["gauges"].values() if s})
+        if sources:
+            props["source"] = {"type": "string", "enum": sources}
+    search = tools.get("find_stations")
+    if search and search["query"]:
+        props["query"] = {"type": "string", "enum": list(search["query"])}
+    pts = list(dict.fromkeys(p for t in ("anywhere", "describe_catchment") for p in tools.get(t, {}).get("points", [])))
+    if pts:
+        props["lat"] = {"type": "number", "enum": list(dict.fromkeys(p[0] for p in pts))}
+        props["lon"] = {"type": "number", "enum": list(dict.fromkeys(p[1] for p in pts))}
+    if search and search["points"]:
+        coords = list(dict.fromkeys(v for p in search["points"] for v in p))
+        props["near"] = {"type": "array", "items": {"type": "number", "enum": coords}, "minItems": 2, "maxItems": 2}
+    if search:
+        props["limit"] = {"type": "integer", "enum": list(range(1, 11))}
+    return {"type": "object", "properties": props, "additionalProperties": False}
+
+
+def step_schema(results: list[dict[str, Any]], words: str = "", *, step: int = 1, budget: int | None = None,
+                force_answer: bool = False, notes: list[str] | None = None) -> dict[str, Any]:
+    """The reply this step may give: ``{"mode", "schema", "prompt", "budget", "keys"}``.
+
+    ``mode`` is "tool" on the first step (there are no facts yet), "answer" on the last, after a repeated call,
+    or when no tool is left, and "either" between. ``schema`` is the responseConstraint, with every value an
+    enum built here: the tool names still open, the gauge ids and sources and search phrases the words and
+    results hold, and the fact keys of :func:`fact_table` with :data:`CONNECTIVES`. ``prompt`` is the step's
+    message: the question, what has run, and the facts by key with the sentence each one writes. "none" means
+    no tool can run and nothing can be answered (no gauge, place or point in the words). ``notes`` are told
+    to the model (a call refused at the step before, a repeat not run).
+    """
+    budget = budget or step_budget(words)
+    known = _known(results, words)
+    table = fact_table(results)
+    keys = [f["key"] for f in table["facts"]]
+    tools = _tools_open(results, known)
+    if not keys and not tools:
+        mode = "none"
+    elif force_answer or step >= budget or not tools:
+        mode = "answer" if keys else "none"
+    elif not keys:
+        mode = "tool"
+    else:
+        mode = "either"
+    props: dict[str, Any] = {}
+    if mode in ("tool", "either"):
+        props["tool"] = {"type": "string", "enum": list(tools)}
+        props["arguments"] = _arguments_schema(tools, known)
+    if mode in ("answer", "either"):
+        props["answer"] = {"type": "array", "items": {"type": "string", "enum": keys + list(CONNECTIVES)},
+                           "minItems": 1, "maxItems": MAX_PICKS}
+    required = ["answer"] if mode == "answer" else ["tool", "arguments"] if mode == "tool" else []
+    schema = {"type": "object", "properties": props, "required": required, "additionalProperties": False}
+    return {"mode": mode, "schema": schema, "budget": budget, "keys": keys,
+            "prompt": _step_prompt(words, results, table, tools, mode, notes or [])}
+
+
+def _step_prompt(words: str, results: list[dict[str, Any]], table: dict[str, Any],
+                 tools: dict[str, dict[str, Any]], mode: str, notes: list[str]) -> str:
+    lines = [f"Question: {_question(words).strip()}"]
+    ctx = (words or "").split("\n\nContext:", 1)
+    if len(ctx) == 2 and ctx[1].strip():
+        lines.append(f"Context: {ctx[1].strip()}")
+    ran = [f"{r.get('name')}({json.dumps(r.get('arguments') or {})})" for r in results or [] if isinstance(r, dict)]
+    if ran:
+        lines.append("Already run, do not call again: " + "; ".join(ran) + ".")
+    lines += [f"Note: {n}." for n in notes[-2:]]
+    if mode in ("tool", "either") and tools:
+        offer = []
+        for name, vals in tools.items():
+            if name == "analyze_station":
+                offer.append(f"analyze_station with station_id one of {', '.join(vals['station_id'][:12])}")
+            elif name == "find_stations":
+                bits = []
+                if vals["query"]:
+                    bits.append("query: words from the question")
+                if vals["points"]:
+                    pts = "; ".join(f"[{a:g}, {b:g}]" for a, b in vals["points"][:6])
+                    bits.append(f"near one of {pts}")
+                offer.append(f"find_stations ({' or '.join(bits)}; limit up to 10)")
+            else:
+                pts = "; ".join(f"{a:g}, {b:g}" for a, b in vals["points"][:6])
+                offer.append(f"{name} with lat, lon one of: {pts}")
+        lines.append("Tools you may call: " + "; ".join(offer) + ".")
+    if table["facts"] and mode in ("answer", "either"):
+        lines.append("Facts you may answer with, by key (AquaScope writes each sentence):")
+        lines += [f"{f['key']}: {_write([f], table['gauges'], short=True)[0]}" for f in table["facts"]]
+        lines += [f"{k}: {v}" for k, v in CONNECTIVES.items()]
+    if mode == "answer":
+        lines.append('Reply now with {"answer": [the keys of the facts that answer the question, in order]}.')
+    elif mode == "tool":
+        lines.append('Reply with {"tool": "<name>", "arguments": {...}}.')
+    else:
+        lines.append('Reply with {"answer": [keys]} if the facts answer the question, else with one tool call '
+                     '{"tool": "<name>", "arguments": {...}}.')
+    return "\n".join(lines)
+
+
+# ── the answer, written here from the keys the model picked ───────────────────
+
+
+def render_answer(reply: Any, results: list[dict[str, Any]], words: str = "", *,
+                  why: str | None = None) -> dict[str, Any]:
+    """Write the answer from the fact keys the model picked: ``{"ok", "text", "sentences", "picked", "refused",
+    "facts", "notes"}``.
+
+    ``reply`` is the model's ``{"answer": [keys]}``. Every key must be in :func:`fact_table` for these results
+    or in :data:`CONNECTIVES`; anything else (a key that is not there, free text, a tool call when only an
+    answer may come) is refused before display, and the page then shows ``facts`` (the summary lines) with the
+    refusal in one short line. ``why`` refuses with that reason (the steps ran out, the model stopped). The
+    written text then goes through :func:`lock_answer` as a second line of defence.
+    """
+    table = fact_table(results)
+    by_key = {f["key"]: f for f in table["facts"]}
+    summary = _write([f for f in table["facts"] if f.get("default")], table["gauges"])[:12]
+    notes = _search_notes(results, words)
+    base = {"facts": summary, "notes": notes, "sentences": [], "picked": [], "text": ""}
+    if why:
+        return {**base, "ok": False, "refused": [why]}
+    picks = reply.get("answer") if isinstance(reply, dict) else None
+    if isinstance(picks, str):
+        return {**base, "ok": False, "refused": ["the model wrote free text instead of picking facts by key"]}
+    if not isinstance(picks, list) or not picks:
+        what = "a tool call" if isinstance(reply, dict) and reply.get("tool") else "no facts"
+        return {**base, "ok": False, "refused": [f"the model gave {what} where its answer should be"]}
+    bad = [str(k)[:60] for k in picks if not isinstance(k, str) or (k not in by_key and k not in CONNECTIVES)]
+    if bad:
+        return {**base, "ok": False, "refused": [f"{', '.join(repr(b) for b in bad[:3])} "
+                                                 f"{'is' if len(bad) == 1 else 'are'} not among the facts"]}
+    ordered = list(dict.fromkeys(picks))[:MAX_PICKS]
+    if not any(k in by_key for k in ordered):
+        return {**base, "ok": False, "refused": ["the model picked no fact, only connecting sentences"]}
+    sentences = []
+    picked_facts: list[dict[str, Any]] = []
+    for k in ordered:
+        if k in by_key:
+            picked_facts.append(by_key[k])
+        else:
+            picked_facts.append({"key": k, "gauge": None, "text": CONNECTIVES[k]})
+    sentences = _write(picked_facts, table["gauges"])
+    text = " ".join(sentences)
+    second = lock_answer(text, results, words)
+    if not second["ok"]:
+        # The package's own sentences failed its own lock: a bug here, not the model's. Shown as refused.
+        return {**base, "ok": False, "refused": ["AquaScope's own check stopped the answer: "
+                                                 + "; ".join(second["refused"][:2])]}
+    return {**base, "ok": True, "refused": [], "sentences": sentences, "picked": ordered, "text": text}
+
+
+def _search_notes(results: list[dict[str, Any]], words: str) -> list[str]:
+    notes = []
+    given = _numbers(normalise(words or ""))
+    for r in results or []:
+        near = (r.get("arguments") or {}).get("near") if isinstance(r, dict) else None
+        if r.get("name") == "find_stations" and isinstance(near, (list, tuple)) and len(near) == 2:
+            if not all(isinstance(v, (int, float)) and _close(float(v), given) for v in near):
+                notes.append(f"The search was near {coord(near[0])}, {coord(near[1])}, a point from an earlier "
+                             "result, not from your words.")
+    return notes

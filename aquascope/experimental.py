@@ -45,6 +45,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.map_commands",
     "aquascope.map_explain",
     "aquascope.map_layers",
+    "aquascope.map_pick",
     "aquascope.map_scout",
     "aquascope.map_time",
     "aquascope.mesh_review",

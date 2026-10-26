@@ -56,7 +56,10 @@ test("the severities, the checks and the words", () => {
   assert.equal(Object.keys(CHECK_LABELS).length, 9);
   assert.deepEqual(reviewWho("rules"), ["Rules", "checks by code, no model"]);
   assert.equal(reviewWho("key", "claude via anthropic")[0], "claude via anthropic");
-  assert.match(reviewWho("device")[1], /numbers by code/);
+  assert.match(reviewWho("device")[1], /picked on this device; checks and words by code/);
+  // Asked, and its reply refused or timed out: said, not "no model" (#590).
+  assert.deepEqual(reviewWho("rules", "", "Chrome's built-in model"),
+    ["Rules", "Chrome's built-in model asked, its choice not used; checks and words by code"]);
   assert.equal(reviewLine({ summary: "Nothing flagged; 5 of 9 checks ran." }, 3),
     "Nothing flagged; 5 of 9 checks ran. 3 pins, most severe first.");
   assert.equal(reviewLine({ summary: "Nothing flagged." }, 0), "Nothing flagged. No pin to drop.");
@@ -108,4 +111,8 @@ test("the review is of the model on screen, and names it", () => {
   assert.match(reviewTarget({}).line, /^No model result on the map/);
   // The final line names the file.
   assert.equal(reviewLine({ summary: "1 problem." }, 2, "Portsmouth.p01.hdf"), "Portsmouth.p01.hdf: 1 problem. 2 pins, most severe first.");
+  // A model picked the pins (#590, round 3): its order, and how many it left out; the counts stay the rules'.
+  assert.equal(reviewLine({ summary: "3 things worth a look; 9 of 9 checks ran." }, 6, "Flood_model.p01.hdf", { picked: true, leftOut: 2 }),
+    "Flood_model.p01.hdf: 3 things worth a look; 9 of 9 checks ran. 6 pins, in the model's order. 2 findings not pinned "
+    + "(the model left them out; the checks list has every one).");
 });

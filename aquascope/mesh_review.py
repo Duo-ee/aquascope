@@ -20,18 +20,21 @@ file stays in the browser), ``aquascope mesh review FILE`` and the MCP tool ``me
 * ``gauges``: the modelled peak against the observed peak at each Archive gauge inside the mesh (timing only:
   a gauge measures flow or stage, the mesh depth), or a line saying there is none.
 
-Every number is formatted here into a finding's ``facts``. The keyless titles and reasons are templates over
-those facts. A model (the reader's own key, or the on-device model) may only order the findings and word them,
-writing each number as a placeholder (``{f3}``) that code fills in; :func:`aquascope.map_explain.claim_lock`
-(Explain's claim lock, #562) refuses wording with any number its facts do not hold, and a ranking word the
-rules wording does not use is refused too.
+Every number is formatted here into a finding's ``facts``. The titles and reasons are templates over those
+facts, written here. The model picks, the code writes (#590, round 3): a model (the reader's own key, or the
+on-device model) decides which findings to pin, in what order, and which of three fixed variants of each to
+show (:func:`review_variants`), as ids held to a JSON Schema of enums (:func:`review_schema`). It writes no word
+of a pin, so it cannot change a value, a count, a bound, a severity or a "not"; a problem is pinned even when it
+is left out, and the review's counts are always the rules' counts. A reply outside the enums is refused whole and
+the rules' wording stands (:func:`apply_words`). The older checks (:func:`negation_flip`, the claim lock of
+:func:`aquascope.map_explain.claim_lock`) stay as a second line of defence; the tests hold every variant to
+them.
 
 numpy and the standard library only, so it runs in the Explorer's mesh worker beside the reader.
 """
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from datetime import date, datetime, timedelta
@@ -43,7 +46,7 @@ from aquascope.io.mesh import DRY_DEPTH, Mesh, MeshError
 
 __all__ = [
     "CHECKS", "SEVERITIES", "apply_words", "cells_at", "check_volume", "gather_context", "gather_floods",
-    "gauges_inside", "model_words", "review", "review_file", "review_prompt",
+    "gauges_inside", "model_words", "review", "review_file", "review_prompt", "review_schema", "review_variants",
 ]
 
 #: The checks, in the order the review lists them, with the words a reader sees for each.
@@ -893,60 +896,119 @@ def _summary(counts: dict[str, int], checks: list[dict[str, Any]]) -> str:
     return f"{head}; {_count(len(ran))} of {_count(len(checks))} checks ran."
 
 
-# ── the model path: it orders and words, code holds the numbers ─────────────
+# ── the model path: the model picks, the code writes (#590, round 3) ────────
 
 _RANKING = re.compile(r"\b(deepest|highest|lowest|largest|smallest|biggest|worst|best|most|least|record|"
                       r"unprecedented|catastrophic|severe|dangerous|safe|wrong|correct)\b", re.I)
 
 
+def _lead_sentence(text: str) -> str:
+    """The first sentence of ``text`` (a decimal point is not a sentence's end)."""
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z])", (text or "").strip(), maxsplit=1)
+    return parts[0]
+
+
+def review_variants(f: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    """A finding's title and reason in each of its fixed variants, all the package's words: ``a`` the rules'
+    own, ``b`` the check's name as the title over the same reason, ``c`` the rules' title over the reason's
+    first sentence."""
+    title, reason = f.get("rules_title") or f["title"], f.get("rules_reason") or f["reason"]
+    return {"a": (title, reason), "b": (f.get("label") or CHECKS.get(f["check"], title), reason),
+            "c": (title, _lead_sentence(reason))}
+
+
+def review_schema(ids: list[str]) -> dict[str, Any]:
+    """The JSON Schema a model's reply is held to: the findings it pins, in its order, each an id from ``ids``
+    and a variant id (:data:`aquascope.map_pick.VARIANTS`). Nothing in it is free text."""
+    from aquascope.map_pick import VARIANTS, choice
+
+    return {"type": "object", "required": ["pins"], "additionalProperties": False, "properties": {
+        "pins": {"type": "array", "minItems": 1, "maxItems": max(1, len(ids)), "items": {
+            "type": "object", "required": ["id", "variant"], "additionalProperties": False,
+            "properties": {"id": choice(ids), "variant": choice(VARIANTS)}}}}}
+
+
 def review_prompt(findings: list[dict[str, Any]], context: str = "") -> dict[str, Any]:
-    """The system prompt, the user message and the reply schema for a model that orders and words a review."""
-    items = []
+    """The system prompt, the user message and the reply schema for a model that picks which findings to pin,
+    in what order, and a variant of each. It writes no word of a pin: every title, reason, value, count and
+    severity is the package's, and the review's counts are always the rules' counts."""
+    from aquascope.map_pick import VARIANTS
+
+    lines = []
     for f in findings:
-        items.append({"id": f["id"], "check": f["label"], "severity": f["severity"], "rules_title": f["rules_title"],
-                      "rules_reason": f["rules_reason"],
-                      "facts": [{"placeholder": "{" + x["id"] + "}", "label": x["label"], "value": x["shown"],
-                                 **({"unit": x["unit"]} if x.get("unit") else {}),
-                                 **({"when": x["when"], "when_placeholder": "{" + x["id"] + ".when}"}
-                                    if x.get("when") else {})} for x in f["facts"]]})
+        v = review_variants(f)
+        lines.append(f"{f['id']} ({f['severity']}, {f['label']}):")
+        lines += [f"  {k}: {v[k][0]}. {v[k][1]}" for k in VARIANTS]
     system = "\n".join([
-        "You help a hydraulic modeller review a model run shown on a map. Below are findings made by code from the "
-        "model file and from observed floods and gauges, each with an id, its severity, its rules wording and its "
-        "facts.",
-        "Order the findings, most worth the modeller's attention first (a problem before a warning before "
-        "information), and write for each a short title (at most 60 characters) and a reason (one or two plain "
-        "sentences, at most 260 characters).",
-        "Never write a number yourself, in digits or in words. Write each value as its fact's placeholder, "
-        "exactly as given ({f3}, or {f3.when} for its time); code fills them in, and wording with any other "
-        "number is thrown away. Use only the placeholders of that finding's own facts.",
-        "Do not judge the model right or wrong, and do not add causes or advice the rules wording does not hold. "
-        "Do not use a ranking word (deepest, largest, worst...) unless the rules wording uses it.",
-        "Keep every 'not', 'no', 'never' and 'unless' of the rules wording: 'worth a look if it is not a channel "
-        "or a pit you expect' never becomes 'if it is expected'.",
-        'Reply with ONE JSON object: {"order": [ids], "notes": [{"id", "title", "reason"}]}.',
+        "You help a hydraulic modeller review a model run shown on a map. Code made each finding below from the "
+        "model file and from observed floods and gauges, and wrote it in three variants. You only choose; you "
+        "never write a word of a pin.",
+        "",
+        *lines,
+        "",
+        "Pick the findings worth a pin, the most worth the modeller's attention first (a problem before a warning "
+        "before information), and for each the variant that reads best. A problem is always pinned.",
+        'Reply with ONE JSON object and nothing else: {"pins": [{"id": "r1", "variant": "a"}]}',
     ])
     if context:
         system += f"\n\nWhat the modeller is looking at: {context}"
-    schema = {"type": "object", "required": ["order", "notes"], "properties": {
-        "order": {"type": "array", "items": {"type": "string"}},
-        "notes": {"type": "array", "items": {"type": "object", "required": ["id", "title", "reason"],
-                                             "properties": {"id": {"type": "string"}, "title": {"type": "string"},
-                                                            "reason": {"type": "string"}}}}}}
-    return {"system": system, "prompt": json.dumps({"findings": items}, ensure_ascii=False), "schema": schema}
+    return {"system": system, "prompt": "Choose the pins.", "schema": review_schema([f["id"] for f in findings])}
 
 
-def _reply_json(reply: Any) -> Any:
-    if not isinstance(reply, str):
-        return reply
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", reply.strip())
-    start = raw.find("{")
-    if start < 0:
-        return None
-    try:
-        data, _ = json.JSONDecoder().raw_decode(raw[start:])
-        return data
-    except ValueError:
-        return None
+def apply_words(findings: list[dict[str, Any]], reply: Any, *, by: str = "model") -> dict[str, Any]:
+    """Hold a model's reply to :func:`review_schema` and apply it: ``{"findings", "refused", "ordered",
+    "left_out"}``. A reply with any id or variant outside the schema's enums, or any other field, is refused
+    whole (:func:`aquascope.map_pick.pick`): every finding is pinned in the rules' order and wording, and
+    ``refused`` says why. A reply that fits pins the findings it picks, in its order, each in its variant
+    (``by`` marks them); a problem it left out is pinned after them all the same, and ``left_out`` lists the
+    other findings it did not pin. Values, places, severities, counts and the flagged cells are never the
+    model's."""
+    from aquascope.map_pick import pick
+
+    data, errors = pick(reply, review_schema([f["id"] for f in findings]))
+    if errors:
+        more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
+        return {"findings": [dict(f) for f in findings], "ordered": False, "left_out": [],
+                "refused": [f"the model's reply was refused: {errors[0]}{more}"]}
+    byid = {f["id"]: f for f in findings}
+    picked: dict[str, str] = {}
+    for p in data["pins"]:
+        picked.setdefault(p["id"], p["variant"])
+    problems = [f["id"] for f in findings if f["severity"] == "problem" and f["id"] not in picked]
+    out = []
+    for rank, fid in enumerate([*picked, *problems], 1):
+        f = {**byid[fid], "rank": rank}
+        if fid in picked:
+            f["title"], f["reason"] = review_variants(f)[picked[fid]]
+            f.update(variant=picked[fid], by=by)
+        out.append(f)
+    left = [f["id"] for f in findings if f["id"] not in picked and f["id"] not in problems]
+    return {"findings": out, "refused": [], "ordered": True, "left_out": left}
+
+
+def model_words(findings: list[dict[str, Any]], *, provider: str | None = None, model: str | None = None,
+                api_key: str | None = None, base_url: str | None = None, context: str = "",
+                client: Any = None) -> dict[str, Any]:
+    """Ask the reader's own model (their key, the provider registry) to pick, order and choose a variant of the
+    findings, and hold its reply to the schema (:func:`apply_words`). No key of ours is ever used."""
+    from aquascope.ai_engine.analyst import resolve_llm
+    from aquascope.ai_engine.llm_transport import make_client
+
+    if client is None:
+        cfg = resolve_llm(provider, model, api_key, base_url)
+        client = make_client(cfg["api_key"], cfg["base_url"], provider=cfg["provider"])
+        model, provider = cfg["model"], cfg["provider"]
+    p = review_prompt(findings, context)
+    resp = client.chat.completions.create(
+        model=model, temperature=0, max_tokens=600,
+        messages=[{"role": "system", "content": p["system"]}, {"role": "user", "content": p["prompt"]}],
+    )
+    res = apply_words(findings, resp.choices[0].message.content or "", by="key")
+    res["model"] = f"{model} via {provider}" if provider else str(model)
+    return res
+
+
+# ── the older wording checks: a second line of defence over the package's own words ─
 
 
 # "under {f1}", "< {f1}", "below {f1}", "less than {f1}": a count said to be under a value.
@@ -1080,56 +1142,6 @@ def _locked(f: dict[str, Any], title: str, reason: str) -> tuple[tuple[str, str]
     if "{" in _PLACEHOLDER.sub("", words) or "}" in _PLACEHOLDER.sub("", words):
         return None, "a stray brace"
     return (_fill(title, own), _fill(reason, own)), None
-
-
-def apply_words(findings: list[dict[str, Any]], reply: Any, *, by: str = "model") -> dict[str, Any]:
-    """Hold a model's reply to the claim lock: ``{"findings", "refused", "ordered"}``. The model's order is kept
-    for the ids it knows (the rules order follows for the rest); each title and reason that passes replaces
-    the template, the others keep it and are listed in ``refused``. Values, places, severities and the flagged
-    cells are never the model's."""
-    data = _reply_json(reply)
-    byid = {f["id"]: f for f in findings}
-    if not isinstance(data, dict):
-        return {"findings": [dict(f) for f in findings], "refused": ["the model did not reply with JSON"],
-                "ordered": False}
-    order = [i for i in dict.fromkeys(str(x) for x in data.get("order") or []) if i in byid]
-    ordered = bool(order)
-    order += [f["id"] for f in findings if f["id"] not in order]
-    notes = {str(n.get("id")): n for n in data.get("notes") or [] if isinstance(n, dict)}
-    out, refused = [], []
-    for rank, fid in enumerate(order, 1):
-        f = {**byid[fid], "rank": rank}
-        n = notes.get(fid)
-        if n:
-            got, why = _locked(f, n.get("title"), n.get("reason"))
-            if got:
-                f.update(title=got[0], reason=got[1], by=by)
-            else:
-                refused.append(f"{fid}: {why}")
-        out.append(f)
-    return {"findings": out, "refused": refused, "ordered": ordered}
-
-
-def model_words(findings: list[dict[str, Any]], *, provider: str | None = None, model: str | None = None,
-                api_key: str | None = None, base_url: str | None = None, context: str = "",
-                client: Any = None) -> dict[str, Any]:
-    """Ask the reader's own model (their key, the provider registry) to order and word the findings, and hold its
-    reply to the claim lock. No key of ours is ever used."""
-    from aquascope.ai_engine.analyst import resolve_llm
-    from aquascope.ai_engine.llm_transport import make_client
-
-    if client is None:
-        cfg = resolve_llm(provider, model, api_key, base_url)
-        client = make_client(cfg["api_key"], cfg["base_url"], provider=cfg["provider"])
-        model, provider = cfg["model"], cfg["provider"]
-    p = review_prompt(findings, context)
-    resp = client.chat.completions.create(
-        model=model, temperature=0, max_tokens=2000,
-        messages=[{"role": "system", "content": p["system"]}, {"role": "user", "content": p["prompt"]}],
-    )
-    res = apply_words(findings, resp.choices[0].message.content or "", by="key")
-    res["model"] = f"{model} via {provider}" if provider else str(model)
-    return res
 
 
 # ── what lies outside the file: observed floods and gauges ──────────────────

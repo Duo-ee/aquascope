@@ -125,7 +125,7 @@ benchmark:
 
 - **Python:** `aquascope.rivers`, `river_path`, `nownext`, `evidence`, `watch`, `bulletin`, `context`,
   `flood_depth`, `flowstatus`, `waterbalance`, `whatif_map`, `mesh_review`, the `map_*` modules
-  (`map_commands`, `map_explain`, `map_layers`, `map_scout`, `map_time`), `io.mesh`, `io.swmm`,
+  (`map_commands`, `map_explain`, `map_layers`, `map_pick`, `map_scout`, `map_time`), `io.mesh`, `io.swmm`,
   `io.engineering`, `groundwater.surface`, `hydrology.b17c_check`, and `aquascope.gym` (AquaScope Bench, #440).
 - **CLI:** `layers`, `map`, `whatif`, `mesh`, `swmm`, `bulletin`, `warnings`, `waterbalance`, `flowstatus`,
   `now`, `watch`, `river`, `evidence`, `context`, `modflow`, `export`, `gym`, and the `surface` flags of

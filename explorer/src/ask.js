@@ -288,20 +288,29 @@ async function runLocally(question) {
   $("ask-log").hidden = false;
   $("ask-result").hidden = true;
   $("ask-checks").hidden = true;
+  // Stop ends the question on the facts gathered so far; so does each step's time limit (askLoop).
+  const stop = new AbortController();
+  cancelAsk = () => stop.abort();
+  $("ask-stop").hidden = false;
   askStatus("Starting the model on your device…");
   try {
-    // The worker runs each tool and hands back the package's compact result (stats, trend, return levels, no
-    // series), and the package's lock holds the answer to this question's results (#590,
-    // aquascope.ai_engine.device_ask): a number, id or trend word that is not in them and the page shows the
-    // tools' facts with one line saying the model's wording was refused.
+    // The model picks, the package writes (#590, round 3; aquascope.ai_engine.device_ask). Each step's reply is
+    // held to a schema of enums the package builds from this question (plan); a tool call is checked and run in
+    // the worker, which hands back the compact result (callTool); the answer is the package's sentences for the
+    // fact keys the model picked (render). Nothing the model writes reaches the page.
+    const ask = (op, extra) => call("device_ask", { op, ...extra });
     const res = await askLocally(question, {
-      // The catalogue's name and river go with an analysis, so the model can name the gauge and the lock can
-      // tell which gauge a sentence is about when two are compared.
-      callTool: async (name, args) => withCatalogueName(
-        await call("device_ask", { op: "tool", name, arguments: args }), args, state.byKey),
-      lock: (answer, results, words) => call("device_ask", { op: "lock", answer, results, words }),
+      plan: ({ results, words, step, budget, force, notes }) =>
+        ask("plan", { results, words, step, budget, force, notes }),
+      // The catalogue's name and river go with an analysis, so the sentences can name the gauge.
+      callTool: async (reply, results, words) => {
+        const out = await ask("tool", { reply, results, words });
+        return withCatalogueName(out, out && out.arguments, state.byKey);
+      },
+      render: (reply, results, words, why) => ask("render", { reply, results, words, why }),
       onEvent: (m) => (m.startsWith("tool ") ? askLog(m) : askStatus(m)),
       context: ctx,
+      signal: stop.signal,
     });
     askStatus("");
     state.ask.markdown = deviceAnswerMarkdown(question, res);
@@ -315,6 +324,8 @@ async function runLocally(question) {
   } catch (err) {
     askStatus(`The on-device model could not run: ${err.message}`, "error");
   } finally {
+    cancelAsk = null;
+    $("ask-stop").hidden = true;
     state.ask.running = false;
     $("ask-run").disabled = false;
     $("ask-run").textContent = "Ask";

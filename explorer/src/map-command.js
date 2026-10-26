@@ -94,8 +94,11 @@ async function byRules(text) {
 async function byDevice(text) {
   if (!(await localModelReady())) return null;
   // The system prompt is the same for every request (the context goes with the words), so the warm session
-  // local-model.js keeps for it is cloned rather than a new one created each time (#590 recheck).
-  const prompt = await callLight("map_command", { op: "prompt", context: "", today: todayIso() }, { priority: 3 });
+  // local-model.js keeps for it is cloned rather than a new one created each time (#590 recheck). The schema is
+  // this request's (#590 round 3): a place the model names is a run of the words, the layers it may switch are
+  // those the words ask for, and it writes no title, note or label; the package writes those.
+  const prompt = await callLight("map_command", { op: "prompt", context: "", today: todayIso(), text },
+    { priority: 3 });
   const ctx = context();
   const reply = await generateJsonLocally({ system: prompt.system, schema: prompt.schema, timeoutMs: 25000,
     prompt: ctx ? `${text}\n\nWhat the reader is looking at: ${ctx}` : text,
