@@ -15,6 +15,7 @@ What is here and why (``docs/stability.md`` has the full policy):
   a cell's heads over time) and ``aquascope.groundwater.budget`` (the cell-by-cell budget reader).
 * The map that computes (#664): ``aquascope.routing``, ``aquascope route`` and the MCP tools ``route_flood`` and
   ``route_storm`` (#656), new in 1.1.
+* Paint the globe (#657, after 1.0.0): ``aquascope.paint``, ``aquascope paint`` and the MCP tool ``paint_map``.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -53,6 +54,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.mesh_review",
     "aquascope.mesh_views",
     "aquascope.nownext",
+    "aquascope.paint",
     "aquascope.river_path",
     "aquascope.rivers",
     "aquascope.routing",
@@ -80,6 +82,7 @@ CLI: tuple[str, ...] = (
     "mesh",
     "modflow",
     "now",
+    "paint",
     "river",
     "route",
     "swmm",
@@ -119,6 +122,7 @@ MCP_TOOLS: tuple[str, ...] = (
     "model_skill",
     "model_to_lean_on",
     "modflow_heads",
+    "paint_map",
     "place_context",
     "reach_record",
     "river_status_month",

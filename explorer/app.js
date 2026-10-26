@@ -58,6 +58,7 @@ import { initMapCommand } from "./src/map-command.js?v=__BUILD__";  // Ask the m
 import { initScout } from "./src/scout.js?v=__BUILD__";  // Scout (#563): pins on what stands out
 import { initWhatIf } from "./src/whatif-map.js?v=__BUILD__";  // What if, on the map (#565)
 import { initRoute } from "./src/route-map.js?v=__BUILD__";  // Route it (#656)
+import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
 
 import { initMetrics } from "./src/metrics-ui.js?v=__BUILD__";
 
@@ -214,6 +215,7 @@ function bringMapOnline(url) {
   initMapActions();   // after every layer it can switch (#561)
   initWhatIf();       // its slot in the action log (#565)
   initRoute();        // its slot in the action log (#656)
+  initPaint();        // Paint this view, and its slot in the action log (#657)
   // A selection made while the map was still dark has nothing on the map yet.
   if (state.selected) {
     highlightStation(`${state.selected.source}/${state.selected.station_id}`);

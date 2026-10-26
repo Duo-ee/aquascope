@@ -96,6 +96,16 @@ PHRASES = [
     ("show me the way of the Nile to the sea", [
         {"type": "fly_to", "place": "Nile", "river": True},
         {"type": "highlight_river", "place": "Nile", "direction": "downstream"}]),
+    # Paint the globe (#657): one question at every gauge in view, or in the region named.
+    ("paint the flood trend", [{"type": "paint", "question": "flood_trend"}]),
+    ("paint this view with the baseflow index", [{"type": "paint", "question": "baseflow_index"}]),
+    ("where are floods getting bigger in Europe", [
+        {"type": "fly_to", "region": "europe", "bbox": [-11.0, 35.0, 40.0, 71.0]},
+        {"type": "paint", "question": "flood_trend", "bbox": [-11.0, 35.0, 40.0, 71.0], "region": "europe",
+         "label": "Europe"}]),
+    ("map low-flow trends in France", [
+        {"type": "fly_to", "place": "France"},
+        {"type": "paint", "question": "low_flow_trend", "place": "France", "label": "France"}]),
 ]
 
 
@@ -353,8 +363,13 @@ def test_the_prompt_carries_examples_computed_by_the_grammar():
     for reply in replies:
         assert mc.parse_model_reply(reply, today=TODAY)["errors"] == []
     # A model that copies a stand-in moves nothing.
-    copied = mc.parse_model_reply(replies[-1], today=TODAY, text="what is going on with the drought")
+    river = next(r for r in replies if "<river>" in r)
+    copied = mc.parse_model_reply(river, today=TODAY, text="what is going on with the drought")
     assert copied["actions"] == [] and "<river>, a place the words do not name" in copied["errors"][0]
+    # The paint example (#657) teaches the question, not a region: a copied <region> is refused, the view stays.
+    painted = next(r for r in replies if '"paint"' in r)
+    copied = mc.parse_model_reply(painted, today=TODAY, text="are floods getting bigger")
+    assert [a["type"] for a in copied["actions"]] == ["paint"] and "bbox" not in copied["actions"][0]
     assert "Today is 2026-10-10" in prompt["system"] and "23.7, 90.4" in prompt["system"]
     assert prompt["schema"] == mc.action_schema()
 

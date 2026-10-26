@@ -1088,6 +1088,63 @@ _out
   }
 }
 
+// ── Paint the globe (#657): aquascope.paint over the gauges in view ─────────
+// The page plans the view and downloads the Archive's per-gauge files itself (several at once); this worker
+// answers them batch by batch. op "start" keeps the plan (every gauge in view, with why the unread ones are
+// unread), "gauges" answers a batch from the files' bytes, "signatures" from signatures.parquet rows, and
+// each answer carries the field test over every gauge painted so far. "summary" is the whole painting
+// (legend counts, licences, methods paragraph); "csv" and "methods" are the downloads.
+async function paintOp({ id, op, question, params, bbox, rows, items, buffers }) {
+  self.__aqPaint = JSON.stringify({ op, question: question || null, params: params || {}, bbox: bbox || null,
+    rows: rows || [], items: items || [] });
+  self.__aqPaintBufs = buffers || [];
+  const code = `
+import json
+from js import __aqPaint, __aqPaintBufs
+from aquascope import paint as _paint
+_PAINT = globals().setdefault("_PAINT_STORE", {})
+_a = json.loads(__aqPaint)
+_op = _a["op"]
+if _op == "questions":
+    _out = _paint.questions()
+elif _op == "start":
+    _PAINT.clear()
+    _PAINT.update(question=_a["question"], params=_a["params"], bbox=_a["bbox"],
+                  order=[r["key"] for r in _a["rows"]], rows={r["key"]: r for r in _a["rows"]})
+    _out = {"ok": True}
+elif _op in ("gauges", "signatures"):
+    _items = _a["items"]
+    if _op == "gauges":
+        for _i, _it in enumerate(_items):
+            _it["csv_gz"] = (bytes(__aqPaintBufs[_i].to_py()) or None) if _i < len(__aqPaintBufs) else None
+    _new = _paint.gauge_rows(_PAINT["question"], _items, _PAINT["params"])
+    for _r in _new:
+        _PAINT["rows"][_r["key"]] = _r
+    _field = None
+    if _paint.QUESTIONS[_PAINT["question"]].kind == "trend":
+        _field = _paint.field_significance(list(_PAINT["rows"].values()),
+                                           alpha_global=float(_PAINT["params"].get("alpha_global") or 0.05))
+    _out = {"rows": _new, "field": _field}
+elif _op == "summary":
+    _rows = [_PAINT["rows"][k] for k in _PAINT["order"]]
+    _PAINT["result"] = _paint.summarize(_PAINT["question"], _rows, params=_PAINT["params"], bbox=_PAINT["bbox"])
+    _out = _PAINT["result"]
+elif _op == "csv":
+    _out = _paint.to_csv(_PAINT["result"])
+elif _op == "methods":
+    _out = _paint.methods_text(_PAINT["result"])
+else:
+    _out = {"error": "unknown paint op"}
+json.dumps(_out, default=str)
+`;
+  try {
+    post("result", { id, result: JSON.parse(await pyodide.runPythonAsync(code)) });
+  } finally {
+    self.__aqPaint = null;
+    self.__aqPaintBufs = null;
+  }
+}
+
 // ── Place context (#520): aquascope.context, one layer per message so the card
 // fills line by line as each answers. op "point" reads a layer at (lat, lon),
 // op "area" over bbox [west, south, east, north]. Every layer reads open data
@@ -1760,6 +1817,7 @@ self.onmessage = async (e) => {
     if (m.type === "device_ask") return await deviceAsk(m);
     if (m.type === "frame_from_station") return await frameFromStation(m);
     if (m.type === "area_study") return await areaStudy(m);
+    if (m.type === "paint") return await paintOp(m);
     if (m.type === "context") return await placeContext(m);
     if (m.type === "watch") return await watchDigest(m);
     if (m.type === "map_command") return await mapCommand(m);

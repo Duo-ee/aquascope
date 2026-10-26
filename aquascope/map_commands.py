@@ -50,6 +50,7 @@ __all__ = [
 ACTION_TYPES = (
     "fly_to", "set_time", "set_layer", "focus_status", "set_basemap", "highlight_river", "draw_area", "add_pin",
     "route",
+    "paint",
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
@@ -60,6 +61,22 @@ DIRECTIONS = ("upstream", "downstream", "both")
 STEPS = ("day", "week", "month")
 STATUS_IDS = tuple(c["id"] for c in STATUS_CLASSES)
 EARLIEST = date(1940, 1, 1)   # GEOGLOWS v2's simulated record starts in 1940; nothing on the map is older
+
+#: Paint the globe (#657): the questions a ``paint`` action may ask, by the id :data:`aquascope.paint.QUESTIONS`
+#: uses (a test keeps the two equal; this module stays free of pandas for the light worker), with the words the
+#: grammar reads for each.
+PAINT_QUESTIONS: dict[str, dict[str, Any]] = {
+    "flood_trend": {"label": "the trend in annual floods", "aliases": (
+        "flood trends", "flood trend", "trend in annual floods", "trends in annual floods", "trend in floods",
+        "trends in floods", "annual flood trends", "annual flood trend", "trend in annual maxima",
+        "annual maximum trend", "trend in peak flows", "peak flow trends", "flood trend map")},
+    "low_flow_trend": {"label": "the trend in low flows", "aliases": (
+        "low flow trends", "low flow trend", "low-flow trends", "low-flow trend", "trend in low flows",
+        "trends in low flows", "trend in low flow", "drought trend", "drought trends", "low flows")},
+    "baseflow_index": {"label": "the baseflow index", "aliases": (
+        "baseflow index", "base flow index", "the bfi", "bfi", "baseflow")},
+}
+PAINT_MIN_YEARS = (5, 100)
 
 #: The map's layers by the id the Explorer uses (explorer/src/map-actions.js maps each to its control; a
 #: test keeps the two lists equal). ``aliases`` are the words the grammar accepts for each.
@@ -308,6 +325,10 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
+                        "question": {"type": "string", "enum": list(PAINT_QUESTIONS),
+                                     "description": "paint: the question to answer at every gauge"},
+                        "min_years": {"type": "integer", "minimum": PAINT_MIN_YEARS[0],
+                                      "maximum": PAINT_MIN_YEARS[1]},
                     },
                     "required": ["type"],
                 },
@@ -461,7 +482,7 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
     out: dict[str, Any] = {"type": kind}
     if action.get("optional") is True:
         out["optional"] = True
-    if action.get("river") is True and kind in ("fly_to", "draw_area", "add_pin"):
+    if action.get("river") is True and kind in ("fly_to", "draw_area", "add_pin", "paint"):
         out["river"] = True   # a lookup preference: the place is a river
     place = _text(action.get("place"), 80)
 
@@ -574,6 +595,27 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
 
     if kind == "route":
         return _validate_route(action, out, place)
+    if kind == "paint":
+        if action.get("question") not in PAINT_QUESTIONS:
+            return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
+        out["question"] = action["question"]
+        bbox = _bbox(action.get("bbox")) if action.get("bbox") is not None else None
+        if bbox:
+            out["bbox"] = bbox
+        elif place:
+            out["place"] = place
+        if action.get("region") in REGIONS and REGIONS[action["region"]]["bbox"]:
+            out["region"] = action["region"]
+            out.setdefault("bbox", REGIONS[action["region"]]["bbox"])
+        if action.get("min_years") is not None:
+            if not _finite(action["min_years"]) or not PAINT_MIN_YEARS[0] <= float(action["min_years"]) <= \
+                    PAINT_MIN_YEARS[1]:
+                return None, f"paint's min_years must be {PAINT_MIN_YEARS[0]} to {PAINT_MIN_YEARS[1]}"
+            out["min_years"] = int(round(float(action["min_years"])))
+        label = _text(action.get("label"), 80)
+        if label:
+            out["label"] = label
+        return out, None
 
     # add_pin
     at_center = action.get("at") == "center"
@@ -731,6 +773,9 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             what = f"the {float(a.get('return_period') or ROUTE_DEFAULT_RP):g}-year flood"
         return f"Route {what} over {span} from {where}"
+    if kind == "paint":
+        where = a.get("label") or a.get("place") or ("the box" if a.get("bbox") else "this view")
+        return f"Paint {where}: {PAINT_QUESTIONS[a['question']]['label']}"
     return str(kind)
 
 
@@ -1101,6 +1146,56 @@ def _pin_phrase(c: _Clause) -> None:
     c.add("pin", action)
 
 
+_PAINT_ALIASES = sorted(((alias, key) for key, v in PAINT_QUESTIONS.items() for alias in v["aliases"]),
+                        key=lambda x: -len(x[0]))
+_PAINT_Q = "(?P<q>" + "|".join(re.escape(a) for a, _ in _PAINT_ALIASES) + ")"
+_WHERE = r"(?:\s+(?:in|across|over|for|around)\s+(?:the\s+)?(?P<where>[a-z][a-z' .-]*))?"
+
+
+def _paint_where(c: _Clause, where: str | None, question: str) -> None:
+    """The paint action, and a flight to the region or place it names (none: this view)."""
+    paint: dict[str, Any] = {"type": "paint", "question": question}
+    if not where:
+        c.add("paint", paint)
+        return
+    region = _region(where)
+    if region and REGIONS[region]["bbox"]:
+        spec = REGIONS[region]
+        c.add("paint", {"type": "fly_to", "region": region, "bbox": spec["bbox"]},
+              {**paint, "region": region, "bbox": spec["bbox"], "label": spec["label"]})
+        return
+    place = _place_text(_raw_span(c, where))
+    c.add("paint", {"type": "fly_to", "place": place}, {**paint, "place": place, "label": place})
+
+
+def _paint_phrase(c: _Clause) -> None:
+    """Paint the globe (#657): "paint the flood trend", "map low-flow trends in France", "where are floods getting
+    bigger in Europe?", "are droughts getting worse in Poland?". The question is one of :data:`PAINT_QUESTIONS`."""
+    m = re.search(r"^(?:paint|colou?r|map|show)\s+(?:(?:this|the|my)\s+(?:view|map|screen)\s+)?(?:with\s+|by\s+)?"
+                  r"(?:the\s+)?" + _PAINT_Q + r"(?:\s+map)?(?:\s+(?:here|in view|on the map))?" + _WHERE + r"$", c.text)
+    if not m:
+        m = re.search(r"^(?:paint|colou?r)\s+(?:this|the)\s+(?:view|map|screen)\s+(?:with|by)\s+(?:the\s+)?"
+                      + _PAINT_Q + r"$", c.text)
+    if m:
+        question = dict(_PAINT_ALIASES)[m.group("q")]
+        c.text = ""
+        _paint_where(c, m.groupdict().get("where"), question)
+        return
+    m = re.search(r"^(?:where\s+)?(?:are|is)\s+(?:the\s+)?(?P<thing>floods?|flood peaks|peak flows|annual floods|"
+                  r"low flows|low-flows|droughts?|dry spells)\s+(?:getting|becoming|growing)\s+"
+                  r"(?:bigger|larger|worse|smaller|more severe|less severe|lower|higher|stronger|weaker)"
+                  + _WHERE + r"$",
+                  c.text) \
+        or re.search(r"^(?:where\s+)?(?:are|is)\s+(?:the\s+)?(?P<thing>floods?|flood peaks|peak flows|annual floods|"
+                     r"low flows|low-flows|droughts?)\s+(?:increasing|decreasing|rising|falling|changing|growing|"
+                     r"shrinking)" + _WHERE + r"$", c.text)
+    if m:
+        thing = m.group("thing")
+        question = "low_flow_trend" if re.match(r"low|drought|dry", thing) else "flood_trend"
+        c.text = ""
+        _paint_where(c, m.group("where"), question)
+
+
 _NOT_IN_NAMES = frozenset("""a an my your our some something anything everything nothing way how why what which clever
 please it things stuff help more weather forecast data are is was were running flowing doing""".split())
 
@@ -1155,7 +1250,7 @@ def _place_phrase(c: _Clause) -> None:
 
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
-                                      "highlight_river", "route", "add_pin"))}
+                                      "highlight_river", "route", "add_pin", "paint"))}
 
 
 def _parse_clause(raw: str, today: date) -> _Clause:
@@ -1163,7 +1258,8 @@ def _parse_clause(raw: str, today: date) -> _Clause:
     c.text = re.sub(r"^(?:please|hey|ok|okay|now|can you|could you|would you|i want to|i'd like to|let me|let's)\s+",
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
-    for step in (_pin_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _route_phrase, _river_phrase):
+    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _route_phrase,
+                 _river_phrase):
         step(c)
         if c.actions:
             return c
@@ -1494,6 +1590,17 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 notes.append(f"{a['place']} has no position for a pin")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"])
+        elif a["type"] == "paint":
+            if hit.get("bbox"):
+                b["bbox"] = hit["bbox"]
+            elif hit.get("lat") is not None:
+                # A point (a town): the gauges within a degree of it.
+                b["bbox"] = [round(hit["lon"] - 1.0, 4), round(hit["lat"] - 1.0, 4), round(hit["lon"] + 1.0, 4),
+                             round(hit["lat"] + 1.0, 4)]
+            else:
+                notes.append(f"{a['place']} has no position to paint around")
+                continue
+            b.setdefault("label", hit["name"])
         b["where"] = label
         out.append(b)
     return {"actions": out, "notes": notes, "credit": PLACE_CREDIT if used else None,
@@ -1509,6 +1616,7 @@ EXAMPLES = (
     "play the last 5 years",
     "turn on floods past and turn off floods ahead",
     "trace the Nile to the sea",
+    "where are floods getting bigger in Europe",
 )
 
 
@@ -1530,7 +1638,7 @@ def _example_shots(t: date) -> list[tuple[str, list[dict[str, Any]]]]:
             if b.get("region") in REGIONS:
                 label = REGIONS[b["region"]]["label"]
                 request = re.sub(re.escape(label), "<region>", request, flags=re.I)
-                b = {"type": b["type"], "place": "<region>"}
+                b = {**{k: v for k, v in b.items() if k not in ("region", "bbox", "label")}, "place": "<region>"}
             elif b.get("place"):
                 stand_in = "<river>" if b["place"] in rivers else "<place>"
                 request = re.sub(r"\b" + re.escape(b["place"]) + r"\b", stand_in, request, flags=re.I)
@@ -1551,6 +1659,7 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
     basemaps = "; ".join(f"{k} ({v['label']})" for k, v in BASEMAPS.items())
     classes = ", ".join(STATUS_IDS)
     shots = [f"Request: {ex}\nReply: {json.dumps({'actions': acts})}" for ex, acts in _example_shots(t)]
+    paint_questions = ", ".join(f"{k} ({v['label']})" for k, v in PAINT_QUESTIONS.items())
     lines = [
         "You control a world map of rivers. Turn the reader's request into map actions.",
         'Reply with ONE JSON object and nothing else: {"actions": [ ... ]}, '
@@ -1571,6 +1680,9 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         "upstream (what drains to it), downstream (its way to the sea) or both.",
         '- draw_area: outline an area. "bbox" or "place", and a short "label".',
         '- add_pin: a pin with a note. "lat" and "lon" (or "place"), a short "title" and "text".',
+        '- paint: answer one question at every gauge in a region and paint the map with it. "question" among '
+        + paint_questions + '; "place" for the region, or none to paint the view. Fly there first. '
+        "The numbers are computed by the map, never by you.",
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "
@@ -1646,7 +1758,7 @@ def ground_places(actions: Any, text: str) -> tuple[Any, list[str]]:
         what = "box" if a.get("bbox") is not None else "point"
         if _text(a.get("place"), 80):
             out.append(bare)
-        elif region and kind in ("fly_to", "draw_area"):
+        elif region and kind in ("fly_to", "draw_area", "paint"):
             spec = REGIONS[region]
             out.append({**bare, "region": region, **({"bbox": spec["bbox"]} if spec["bbox"] else {}),
                         "label": spec["label"]})
@@ -1663,6 +1775,11 @@ def ground_places(actions: Any, text: str) -> tuple[Any, list[str]]:
     for i, a in enumerate(out):
         place = _text(a.get("place"), 80) if isinstance(a, dict) else None
         if place and not _place_in_words(place, folded):
+            if a.get("type") == "paint":
+                # The question still stands: the view is painted, not a place the words never named (#657).
+                kept.append({k: v for k, v in a.items() if k not in ("place", "label", "river")})
+                notes.append(f"action {i + 1}: {place}, a place the words do not name; this view is painted")
+                continue
             notes.append(f"action {i + 1}: {place}, a place the words do not name; name the place to go to")
             continue
         kept.append(a)
