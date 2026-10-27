@@ -1383,6 +1383,62 @@ def cmd_route(args: argparse.Namespace) -> None:
     print(f"  {res['attribution']}")
 
 
+def cmd_well(args: argparse.Namespace) -> None:
+    """`aquascope well`: drop pumping wells and read the drawdown cone (Theis with superposition, #660)."""
+    from aquascope.sketch import drawdown as dd
+
+    if args.check:
+        res = dd.check()
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+        for r in res["rows"]:
+            print(f"  {'ok ' if r['ok'] else 'NO '} {r['what']}: printed {r['printed']}, computed {r['computed']}"
+                  f"{(' ' + r['unit']) if r['unit'] and isinstance(r['computed'], float) else ''}")
+        for src in res["sources"]:
+            print(f"  {src}")
+        if not res["ok"]:
+            sys.exit(1)
+        return
+    if not args.at:
+        print("  Give at least one --at LON LAT (and --rate for it), or --check.")
+        sys.exit(1)
+    rates = args.rate or []
+    if len(rates) not in (0, 1, len(args.at)):
+        print("  Give one --rate for every well, or one for all of them.")
+        sys.exit(1)
+    wells = [{"lon": lon, "lat": lat, "rate_m3_day": (rates[k] if len(rates) > 1 else rates[0]) if rates
+              else dd.DEFAULTS["rate_m3_day"]} for k, (lon, lat) in enumerate(args.at)]
+    try:
+        res = dd.drawdown_map(wells, days=args.days, transmissivity=args.transmissivity,
+                              storativity=args.storativity, well_radius=args.radius, image=False)
+    except ValueError as exc:
+        print(f"  {exc}")
+        sys.exit(1)
+    if args.geojson:
+        feats = [{"type": "Feature", "properties": {"level_m": c["level"], "label": c["label"]},
+                  "geometry": {"type": "MultiLineString", "coordinates": c["lines"]}} for c in res["contours"]]
+        feats += [{"type": "Feature", "properties": {"well": w["name"], "rate_m3_day": w["rate_m3_day"],
+                                                     "drawdown_at_well_m": w["at_well_m"]},
+                   "geometry": {"type": "Point", "coordinates": [w["lon"], w["lat"]]}} for w in res["wells"]]
+        Path(args.geojson).write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        return
+    print(f"  {res['summary']}")
+    print(f"\n  {'Well':<12}{'m3/day':>10}{'L/s':>8}{'at face m':>11}{'own m':>8}{'others m':>10}{'5 cm at':>10}")
+    for w in res["wells"]:
+        print(f"  {w['name']:<12}{w['rate_m3_day']:>10,.0f}{w['rate_l_s']:>8.1f}{w['at_well_m']:>11.2f}"
+              f"{w['own_m']:>8.2f}{w['others_m']:>10.2f}{w['reach_m'] / 1000:>8.1f} km")
+    print(f"  Contours: {', '.join(c['label'] for c in res['contours'])}.")
+    if res.get("cut_at_m"):
+        print(f"  The cone is cut {res['cut_at_m'] / 1000:g} km from the wells.")
+    if args.geojson:
+        print(f"  GeoJSON: {args.geojson}")
+    print(f"  {res['assumptions']}")
+    print(f"  {res['check']}")
+
+
 def cmd_whatif(args: argparse.Namespace) -> None:
     """`aquascope whatif`: a scenario for a reach's basin, carried down the river (#565)."""
     from aquascope import whatif_map as wm
@@ -5160,6 +5216,23 @@ def main() -> None:
     p_rc.add_argument("--lateral", choices=["specific", "none"], default="specific",
                       help="The path's own catchments: area times the tributaries' specific runoff, or nothing")
     p_rc.add_argument("--json", action="store_true")
+    # ── the sketchpad: drop a well (#660) ───────────────────────────
+    p_well = sub.add_parser("well", help="Drop pumping wells and read the drawdown cone (Theis, superposition): the "
+                            "Explorer's Drop a well")
+    p_well.add_argument("--at", nargs=2, type=float, action="append", metavar=("LON", "LAT"), default=None,
+                        help="A well; repeat for several")
+    p_well.add_argument("--rate", type=float, action="append", default=None,
+                        help="Its pumping rate, m3/day (1000); one for every --at, or one for all")
+    p_well.add_argument("--days", type=float, default=30.0, help="Days of pumping (30)")
+    p_well.add_argument("--transmissivity", "-T", type=float, default=500.0,
+                        help="m2/day (500; principal aquifers less than 1 to 100,000, Heath 1983)")
+    p_well.add_argument("--storativity", "-S", type=float, default=1e-4,
+                        help="Dimensionless (1e-4; most confined aquifers 1e-5 to 1e-3, Heath 1983)")
+    p_well.add_argument("--radius", type=float, default=0.15, help="The well's radius, m, for its own drawdown (0.15)")
+    p_well.add_argument("--geojson", default=None, help="Write the contours and the wells to this GeoJSON file")
+    p_well.add_argument("--check", action="store_true",
+                        help="Recompute the textbook checks (Fetter's worked example, USGS PP 708's W(u) table)")
+    p_well.add_argument("--json", action="store_true")
     # ── what if, on the map (#565) ───────────────────────────────────
     p_wi = sub.add_parser("whatif", help="A what-if scenario for a river reach's basin (GR4J) and its change carried "
                           "down the river: the Explorer's What if on the map")
@@ -6090,6 +6163,7 @@ def main() -> None:
         "mesh": cmd_mesh,
         "whatif": cmd_whatif,
         "route": cmd_route,
+        "well": cmd_well,
         "flood": cmd_flood,
         "replay": cmd_replay,
         "swmm": cmd_swmm,

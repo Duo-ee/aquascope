@@ -35,6 +35,7 @@ PHRASES = [
     ("draw a levee from Upton upon Severn to Hanley Castle at 14 m", [
         {"type": "draw_levee", "from_place": "Upton upon Severn", "to_place": "Hanley Castle", "crest": 14.0}]),
     ("breach the levee", [{"type": "draw_breach", "line": "drawn"}]),
+    ("drop a well at Lyon pumping 2000 m3/day", [{"type": "drop_well", "place": "Lyon", "rate_m3_day": 2000.0}]),
     ("replay the Severn flood of November 2024", [{"type": "replay", "place": "Severn", "month": "2024-11"}]),
     ("replay the flood of September 2024 at Asheville", [
         {"type": "replay", "place": "Asheville", "month": "2024-09"}]),
