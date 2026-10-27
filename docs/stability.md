@@ -146,6 +146,9 @@ benchmark:
 - **Added in 1.1:** `aquascope.replay` (replay an event: a past flood as a story on the map, #659), `aquascope replay`
   and the MCP tools `replay_candidates` and `replay_event`; `aquascope.routing.route` takes a real hydrograph
   (`inflow_cms`).
+- **Added in 1.1:** `aquascope.sketch` (the sketchpad, #664): `aquascope.sketch.reservoir` (draw a reservoir,
+  level-pool routing, #662), `aquascope route reservoir` and the MCP tool `route_reservoir`; `aquascope.routing`'s
+  `route`, `route_storm` and `route_network` take `through` (a reach's outflow through a function).
 
 Experimental means:
 

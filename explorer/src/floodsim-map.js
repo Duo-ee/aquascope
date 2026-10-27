@@ -80,7 +80,9 @@ const phone = () => (globalThis.innerWidth || 1024) <= 640;
 
 // ── inputs: the plan, the terrain, the hydrographs ──────────────────────────
 
-async function readTerrain(win) {
+/** The Terrarium terrain of a window { x0, y0, nx, ny, zoom } as a Float32Array (m), rows north to south; a drawn
+ * reservoir's lake (#662) reads its terrain with it too. */
+export async function readTerrain(win) {
   const t = windowTiles(win);
   const canvas = new OffscreenCanvas(t.cols * 256, t.rows * 256);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });

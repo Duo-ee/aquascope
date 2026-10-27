@@ -275,18 +275,22 @@ def plan(polygon: Any, *, reaches: dict[int, dict[str, Any]] | None = None) -> d
     clat = sum(p[1] for p in ring) / len(ring)
     clon = sum(p[0] for p in ring) / len(ring)
     net = rivers._network_for(main[0], clat, clon)
-    members = set(main)
-    dam_id = None
-    for rid in main:
-        i = net.index(rid)
-        if i is None:
-            continue
-        ds = int(net.ds[i])
-        if ds not in members:
-            dam_id = rid
-            break
-    if dam_id is None:
-        dam_id = main[0]
+    # Each reach in the lake drains, through the lake, to a reach whose water leaves it: the dam is on the biggest
+    # river's exit that the most reaches of the lake drain to (the river through the lake, not a side stream).
+    members = set(lake)
+    drains: dict[int, int] = {}
+    for rid in lake:
+        j, seen = rid, set()
+        while True:
+            i = net.index(j)
+            ds = int(net.ds[i]) if i is not None else -1
+            if ds not in members or ds in seen:
+                break
+            seen.add(ds)
+            j = ds
+        drains[j] = drains.get(j, 0) + 1
+    exits = [rid for rid in drains if lake[rid]["order"] == top] or list(drains)
+    dam_id = max(exits, key=lambda rid: (drains[rid], lake[rid]["order"]))
     below = net.index(dam_id)
     ds_id = int(net.ds[below]) if below is not None else -1
     inside = np.asarray(lake[dam_id]["inside"], dtype=float)
@@ -380,6 +384,10 @@ def route_reservoir(polygon: Any, *, z: Any = None, window: dict[str, Any] | Non
 
     dam_id = int(dam["river_id"])
     common = {"hours": hours}
+    # The flood as given, so a page can send the same one through a changed reservoir.
+    flood: dict[str, Any] = ({"storm": storm} if storm is not None else
+                             {k: v for k, v in (("from_river_id", from_river_id), ("return_period", return_period),
+                                                ("peak_cms", peak_cms), ("duration_h", duration_h)) if v is not None})
     if storm is not None:
         args = {k: storm[k] for k in ("rain_mm", "duration_h", "runoff_coefficient") if k in storm}
         run = routing.route_storm(storm["polygon"], frames=frames, through={dam_id: through}, **args, **common)
@@ -430,7 +438,7 @@ def route_reservoir(polygon: Any, *, z: Any = None, window: dict[str, Any] | Non
         "curve": {"level_m": [round(float(v), 2) for v in levels], "area_m2": [routing._sig(float(v)) for v in
                                                                                curve["area_m2"]],
                   "storage_m3": [routing._sig(float(v)) for v in vol]},
-        "cells": curve["n_cells"], "cell_m": round(curve["cell_m"], 1),
+        "cells": curve["n_cells"], "cell_m": round(curve["cell_m"], 1), "flood": flood,
         "area_drawn_km2": round(curve["area_drawn_m2"] / 1e6, 3), "what": what,
         "terrain_source": TERRAIN_CREDIT, "method": METHOD, "check": CHECK["summary"],
         "without": {"peak_at_dam_cms": ref[0]["peak_cms"] if ref else None,
