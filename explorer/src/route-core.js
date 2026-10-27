@@ -157,6 +157,8 @@ export function headline(res) {
 
 /** The action log's line for a run. */
 export function logLabel(res) {
+  const st = res && res.storm;
+  if (st) return `Route a storm of ${Number(st.rain_mm)} mm in ${hoursWords(st.duration_h)}`;
   const i = (res && res.inflow) || {};
   if (finite(i.return_period)) return `Route the ${Number(i.return_period)}-year flood`;
   return `Route ${flowWords(i.peak_cms)} m³/s${i.shape === "block" ? " released" : ""}`;

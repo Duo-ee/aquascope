@@ -1,7 +1,8 @@
 // Levees and breaches on Flood it's grid (#663), on the map: the drawn lines (a levee in amber with its crest along
 // it, a breach dashed red), the line being drawn, the handles that move a selected line's points, and the drawing
 // tool itself (tap the points, or drag a straight line; Done, a double tap or Enter ends it, Escape cancels). The
-// lines become the package's edits in floodsim-map.js; nothing here computes a level.
+// lines become the package's edits in floodsim-map.js; nothing here computes a level. The same tool draws an area
+// for the sketchpad (#670 and on): `polygon: true` closes the outline, needs three points, and a drag draws a box.
 
 import { state } from "./core.js?v=__BUILD__";
 import { map } from "./map.js?v=__BUILD__";
@@ -115,9 +116,10 @@ export function cancelDraw() { if (drawing) drawing.finish(null); }
 
 /**
  * Draw a line on the map: resolves with [[lon, lat], ...] (two points or more) or null when cancelled. `kind` is
- * "levee" or "breach" (for the words); the other lines stay on the map while it is drawn.
+ * "levee" or "breach" (for the words); the other lines stay on the map while it is drawn. With `polygon` it draws
+ * an area instead (three points or more, the outline shown closed; a drag draws a box), and `what` names it.
  */
-export function startLineDraw(kind = "levee") {
+export function startLineDraw(kind = "levee", { polygon = false, what: named = "" } = {}) {
   if (!state.mapOk || !map) return Promise.resolve(null);
   if (drawing) drawing.finish(null);
   ensureLayers();
@@ -127,8 +129,11 @@ export function startLineDraw(kind = "levee") {
   const overlay = document.createElement("div");
   overlay.className = "fs-draw fsk-draw";
   overlay.setAttribute("role", "application");
-  const what = kind === "breach" ? "the breach, along the levee where it fails" : "the levee";
-  overlay.setAttribute("aria-label", `Draw ${what}: tap its points and press Done, or drag a straight line. Escape cancels.`);
+  const what = named || (kind === "breach" ? "the breach, along the levee where it fails" : "the levee");
+  const least = polygon ? 3 : 2;
+  const dragWords = polygon ? "drag a box" : "drag a straight line";
+  const box = (a, b) => [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
+  overlay.setAttribute("aria-label", `Draw ${what}: tap its points and press Done, or ${dragWords}. Escape cancels.`);
   overlay.tabIndex = 0;
   const tip = document.createElement("p");
   tip.className = "fs-hint";
@@ -143,12 +148,13 @@ export function startLineDraw(kind = "levee") {
   const pts = [];
   let down = null, hover = null, lastTap = 0;
   const hint = () => {
-    tip.textContent = pts.length === 0 ? `Draw ${what}: tap where it starts, or drag a straight line.`
-      : pts.length === 1 ? "Tap the next point." : `${pts.length} points. Tap more, or Done.`;
-    done.disabled = pts.length < 2;
+    tip.textContent = pts.length === 0 ? `Draw ${what}: tap where it starts, or ${dragWords}.`
+      : pts.length < least ? "Tap the next point." : `${pts.length} points. Tap more, or Done.`;
+    done.disabled = pts.length < least;
     undo.disabled = pts.length === 0;
   };
-  const paint = () => drawSketches(shown.sketches, { selected: null, draft: hover && pts.length ? [...pts, hover] : pts.length ? [...pts] : null });
+  const ring = (list) => (polygon && list.length >= 3 ? [...list, list[0]] : list);
+  const paint = () => drawSketches(shown.sketches, { selected: null, draft: hover && pts.length ? ring([...pts, hover]) : pts.length ? ring([...pts]) : null });
   return new Promise((resolve) => {
     const finish = (line) => {
       if (!drawing) return;
@@ -157,7 +163,7 @@ export function startLineDraw(kind = "levee") {
       overlay.replaceChildren();
       setTimeout(() => overlay.remove(), 400);   // the click that ends a tap lands on it, not on the map
       drawSketches(shown.sketches, { selected: shown.selected, draft: null });
-      resolve(line && line.length >= 2 ? line : null);
+      resolve(line && line.length >= least ? line : null);
     };
     drawing = { finish };
     hint();
@@ -169,7 +175,7 @@ export function startLineDraw(kind = "levee") {
     cancel.addEventListener("click", (e) => { e.stopPropagation(); finish(null); });
     overlay.addEventListener("keydown", (e) => {
       if (e.key === "Escape") finish(null);
-      else if (e.key === "Enter" && pts.length >= 2) finish(pts);
+      else if (e.key === "Enter" && pts.length >= least) finish(pts);
       else if (e.key === "Backspace") { pts.pop(); hint(); paint(); }
     });
     overlay.addEventListener("pointerdown", (e) => {
@@ -182,7 +188,7 @@ export function startLineDraw(kind = "levee") {
       if (!drawing) return;
       const ll = lngLatAt(e);
       if (down && !pts.length && Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_PX) {
-        drawSketches(shown.sketches, { draft: [down.ll, ll] });
+        drawSketches(shown.sketches, { draft: polygon ? ring(box(down.ll, ll)) : [down.ll, ll] });
         return;
       }
       if (pts.length && e.pointerType === "mouse") { hover = ll; paint(); }
@@ -193,9 +199,9 @@ export function startLineDraw(kind = "levee") {
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_PX;
       const from = down.ll;
       down = null;
-      if (moved && !pts.length) { finish([from, ll]); return; }
+      if (moved && !pts.length) { finish(polygon ? box(from, ll) : [from, ll]); return; }
       const now = Date.now();
-      if (now - lastTap < 350 && pts.length >= 2) { finish(pts); return; }   // a double tap ends the line
+      if (now - lastTap < 350 && pts.length >= least) { finish(pts); return; }   // a double tap ends the line
       lastTap = now;
       pts.push(ll);
       hint();
@@ -216,6 +222,6 @@ export function startLineDraw(kind = "levee") {
       const around = map.unproject([e.clientX - r.left, e.clientY - r.top]);
       map.easeTo({ zoom: map.getZoom() - Math.sign(e.deltaY) * 0.5, around, duration: 150 });
     }, { passive: false });
-    announce(`Drawing ${what}: tap its points and press Done, or drag a straight line.`);
+    announce(`Drawing ${what}: tap its points and press Done, or ${dragWords}.`);
   });
 }
