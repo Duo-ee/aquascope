@@ -117,9 +117,9 @@ shown and not republished.
 
 ## Drop a well
 
-"What happens to the water table if I pump here?" **Drop a well** in the sketchpad's menu, then a click on the map, drops a pumping
-well there. Its drawdown cone is drawn round it: contour lines at 5 cm (dashed, the cone's edge), 10 cm, 20 cm,
-0.5 m, 1, 2, 5 m and deeper, over a fill that darkens with depth. Drop more wells and their cones add. Drag a well and
+"What happens to the water table if I pump here?" **Drop a well** in the sketchpad's menu, then a click on the
+map, drops a pumping well there. Its drawdown cone is drawn round it: contour lines at 5 cm (dashed, the cone's edge),
+10 cm, 20 cm, 0.5 m, 1, 2, 5 m and deeper, over a fill that darkens with depth. Drop more wells and their cones add. Drag a well and
 the cone follows as you drag; change a well's rate, the aquifer's transmissivity and storativity, or the days of
 pumping, and it is computed again. **Play the cone growing** takes the time bar and plays the cone from 6 hours to the
 days you chose.
