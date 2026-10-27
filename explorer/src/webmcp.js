@@ -123,6 +123,8 @@ const TOOLS = [
       + "every gauge in the box answered by aquascope.paint and painted, with field significance. "
       + "replay {place | lat, lon | at: here, month YYYY-MM, pick 1-5}: a past flood told as a story on the map "
       + "(Floods past's flood there that month, assembled by aquascope.replay, #659). "
+      + "draw_storm {rain_mm, duration_h, runoff_coefficient, polygon [[lon,lat],...] | bbox | place | area: drawn}: "
+      + "rain on an area run off and routed down every river below (aquascope.routing.route_storm, #670). "
       + "Each is checked before it runs; place names are looked up in the gazetteer.",
     inputSchema: {
       type: "object",

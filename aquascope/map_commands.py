@@ -43,6 +43,7 @@ from aquascope.map_layers import STATUS_CLASSES
 __all__ = [
     "ACTION_TYPES", "BASEMAPS", "DIRECTIONS", "EXAMPLES", "LAYERS", "PHOTON_URL", "PLACE_CREDIT", "REGIONS",
     "FLOOD_DEFAULT_RP", "FLOOD_FLOWS", "ROUTE_DEFAULT_RP", "SKETCH_LIMITS", "ROUTE_LIMITS", "ROUTE_SHAPES",
+    "STORM_DEFAULTS", "STORM_LIMITS",
     "action_schema", "describe_action", "model_command", "model_prompt", "parse_command", "parse_model_reply",
     "reply_schema", "resolve_actions", "resolve_place", "validate_action", "validate_actions",
 ]
@@ -54,6 +55,7 @@ ACTION_TYPES = (
     "flood_reach",
     "draw_levee", "draw_breach",
     "replay",
+    "draw_storm",
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
@@ -69,6 +71,11 @@ FLOOD_RETURN_PERIODS = (2.0, 500.0)
 #: above mean sea level, a freeboard above the highest flood along the line in m.
 SKETCH_LIMITS = {"points": 200, "level_m": (-100.0, 9000.0), "freeboard_m": (0.0, 20.0)}
 SKETCHES = ("draw_levee", "draw_breach")
+#: Draw a storm (#670): a storm's rain in mm, its hours and its runoff coefficient, the points its outline may
+#: have, and what is used when the words do not say (aquascope.routing.route_storm's own defaults).
+STORM_LIMITS = {"rain_mm": (0.0, 2000.0), "duration_h": (0.0, 720.0), "runoff_coefficient": (0.0, 1.0),
+                "points": 200}
+STORM_DEFAULTS = {"duration_h": 6.0, "runoff_coefficient": 0.3}
 #: Replay an event (#659): which of Floods past's floods near the place a replay action may pick (by rank).
 REPLAY_PICKS = (1, 5)
 DIRECTIONS = ("upstream", "downstream", "both")
@@ -357,6 +364,16 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
+                        "rain_mm": {"type": "number",
+                                    "description": "draw_storm: the rain, mm, as the reader wrote it"},
+                        "runoff_coefficient": {"type": "number",
+                                               "description": "draw_storm: the share of the rain that runs off, "
+                                                              "only when the reader gave it"},
+                        "area": {"type": "string", "enum": ["drawn"],
+                                 "description": "draw_storm: the area the reader draws, or the one on the map"},
+                        "polygon": {"type": "array", "items": {"type": "array", "items": num, "minItems": 2,
+                                                               "maxItems": 2},
+                                    "description": "draw_storm: a ring of [lon, lat] the reader gave"},
                         "month": {"type": "string",
                                   "description": "replay: the month of the flood, YYYY-MM, not after today"},
                         "pick": {"type": "integer", "minimum": REPLAY_PICKS[0], "maximum": REPLAY_PICKS[1],
@@ -638,6 +655,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
         return _validate_sketch(action, out)
     if kind == "replay":
         return _validate_replay(action, out, place, t)
+    if kind == "draw_storm":
+        return _validate_storm(action, out, place)
     if kind == "paint":
         if action.get("question") not in PAINT_QUESTIONS:
             return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
@@ -805,6 +824,51 @@ def _validate_replay(action: dict[str, Any], out: dict[str, Any], place: str | N
     return out, None
 
 
+def _validate_storm(action: dict[str, Any], out: dict[str, Any], place: str | None
+                    ) -> tuple[dict[str, Any] | None, str | None]:
+    """Draw a storm (#670): the rain (``rain_mm``, required), its hours (``duration_h``, 6 when none) and the share
+    that runs off (``runoff_coefficient``, 0.3 when none: aquascope.routing.route_storm's default), over an area: a
+    ``polygon`` of [lon, lat], a ``bbox``, a ``place`` (its outline from the gazetteer) or ``area: "drawn"`` (the
+    reader draws it, or the storm area already on the map). The map turns it into runoff and routes it."""
+    for key in ("rain_mm", "duration_h", "runoff_coefficient"):
+        v = action.get(key)
+        if v is None:
+            continue
+        lo, hi = STORM_LIMITS[key]
+        if not _finite(v) or not (lo < float(v) <= hi):
+            return None, f"draw_storm's {key} must be a number above {lo:g} and at most {hi:g}"
+        out[key] = round(float(v), 3)
+    if "rain_mm" not in out:
+        return None, "draw_storm needs rain_mm, the rain in mm"
+    for key, v in STORM_DEFAULTS.items():
+        out.setdefault(key, v)
+    poly = action.get("polygon")
+    bbox = _bbox(action.get("bbox")) if action.get("bbox") is not None else None
+    if isinstance(poly, (list, tuple)):
+        if not 3 <= len(poly) <= STORM_LIMITS["points"]:
+            return None, f"draw_storm's polygon needs 3 to {STORM_LIMITS['points']} points"
+        pts = []
+        for p in poly:
+            ll = _latlon(p[1], p[0]) if isinstance(p, (list, tuple)) and len(p) == 2 else None
+            if not ll:
+                return None, "draw_storm's polygon is a list of [lon, lat] points"
+            pts.append([ll[1], ll[0]])
+        out["polygon"] = pts
+    elif bbox:
+        w, s_, e, n = bbox
+        out["polygon"] = [[w, s_], [e, s_], [e, n], [w, n]]
+    elif place:
+        out["place"] = place
+    elif action.get("area") in (None, "drawn", "here"):
+        out["area"] = "drawn"
+    else:
+        return None, "draw_storm's area must be \"drawn\", a polygon of [lon, lat], a bbox or a place"
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
 def _validate_sketch(action: dict[str, Any], out: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """A levee or a breach on Flood it's grid (#663): the line (``"drawn"``: the reader draws it on the map; a list
     of [lon, lat]; or ``from_place`` and ``to_place``, two places the map looks up), and for a levee its crest (m
@@ -956,6 +1020,16 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             top = f", down to {float(a['invert']):g} m" if a.get("invert") is not None else ""
         return f"Draw {what} {where}{top}, and flood again"
+    if kind == "draw_storm":
+        if a.get("place") or a.get("label"):
+            where = a.get("label") or a.get("place")
+        elif a.get("polygon"):
+            where = f"an area of {len(a['polygon'])} points"
+        else:
+            where = "the area drawn on the map"
+        c = float(a.get("runoff_coefficient") or STORM_DEFAULTS["runoff_coefficient"])
+        return (f"Rain {float(a['rain_mm']):g} mm in {float(a.get('duration_h') or STORM_DEFAULTS['duration_h']):g} h "
+                f"over {where}, {c:g} of it running off, and route it")
     if kind == "replay":
         where = a.get("label") or a.get("place") or ("the selected river" if a.get("at") == "here" else
                                                      f"{a.get('lat'):.2f}, {a.get('lon'):.2f}")
@@ -1317,6 +1391,48 @@ def _replay_phrase(c: _Clause) -> None:
     c.add("replay", action)
 
 
+_HOURS = (r"(?P<d>\d+(?:\.\d+)?|an?|one|two|three|four|five|six|eight|ten|twelve|twenty)\s*"
+          r"(?P<du>hours?|hrs?|h|days?|d)\b")
+
+
+def _storm_phrase(c: _Clause) -> None:
+    """Draw a storm (#670): "50 mm of rain over this area in 6 hours", "draw a storm of 80 mm over 12 h",
+    "rain 100 mm on Wales in 2 days with a runoff coefficient of 0.5", "a 40 mm storm here". The area is the one
+    the reader draws (or the one on the map) unless a place is named."""
+    if not re.search(r"\d\s*(?:mm|millimet(?:re|er)s?)\b", c.text) or not re.search(r"\b(?:rain\w*|storms?|downpour)\b",
+                                                                                     c.text):
+        return
+    m = re.search(r"^(?:(?:what if|imagine|suppose)\s+)?(?:(?:draw|make|drop|put|add|let|have|run|simulate)\s+)?"
+                  r"(?:it\s+)?(?:rain\s+)?(?:a\s+|an\s+)?"
+                  r"(?:(?:storm|downpour|rainstorm)\s+(?:of\s+)?)?(?P<mm>\d+(?:\.\d+)?)\s*(?:mm|millimet(?:re|er)s?)\b"
+                  r"\s*(?:of\s+)?(?:rain(?:fall)?|storm|downpour|rainstorm)?\s*(?:storm\s+)?(?:falling|fell|falls?)?\s*"
+                  r"(?P<tail>.*)$", c.text)
+    if not m:
+        return
+    tail = m.group("tail").strip()
+    action: dict[str, Any] = {"type": "draw_storm", "rain_mm": float(m.group("mm"))}
+    coef = re.search(r",?\s*(?:with\s+|and\s+)?(?:a\s+)?runoff\s+coefficient\s+(?:of\s+)?"
+                     r"(?P<c>0?\.\d+|1(?:\.0+)?|0)\b", tail)
+    if coef:
+        action["runoff_coefficient"] = float(coef.group("c"))
+        tail = (tail[:coef.start()] + " " + tail[coef.end():]).strip()
+    dur = re.search(r"\b(?:in|over|for|during|within|lasting)\s+" + _HOURS, tail)
+    if dur:
+        n = dur.group("d")
+        num = float(n) if re.match(r"\d", n) else float(_WORD_NUMBERS.get(n, 1))
+        action["duration_h"] = num * (24.0 if dur.group("du").startswith("d") else 1.0)
+        tail = (tail[:dur.start()] + " " + tail[dur.end():]).strip()
+    tail = re.sub(r"\s+", " ", tail).strip(" ,")
+    tail = re.sub(r"^(?:over|on|across|onto|in|above|upon)\s+", "", tail)
+    if not tail or tail in ("here", "this area", "the area", "that area", "this polygon", "the drawn area",
+                            "the area drawn", "this", "it", "there", "the area on the map", "this catchment"):
+        action["area"] = "drawn"
+    else:
+        action["place"] = _place_text(_raw_span(c, re.sub(r"^the\s+", "", tail)))
+    c.text = ""
+    c.add("draw_storm", action)
+
+
 def _sketch_phrase(c: _Clause) -> None:
     """Levees and breaches (#663): "draw a levee", "draw a levee from Upton upon Severn to Hanley Castle at 14 m",
     "build a flood wall 1 m above the flood", "draw a breach", "breach the levee". The line is drawn on the map
@@ -1543,6 +1659,7 @@ def _place_phrase(c: _Clause) -> None:
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
                                       "highlight_river", "route", "flood_reach", "draw_levee", "draw_breach",
                                       "replay",
+                                      "draw_storm",
                                       "add_pin", "paint"))}
 
 
@@ -1552,6 +1669,7 @@ def _parse_clause(raw: str, today: date) -> _Clause:
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
     for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _replay_phrase, _sketch_phrase,
+                 _storm_phrase,
                  _area_phrase, _flood_phrase, _route_phrase, _river_phrase):
         step(c)
         if c.actions:
@@ -1891,6 +2009,14 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 notes.append(f"{a['place']} has no position to start the flood from")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
+        elif a["type"] == "draw_storm":
+            if not hit.get("bbox"):
+                notes.append(f"the gazetteer gives no outline for {a['place']}, only a point: draw the storm on "
+                             "the map")
+                continue
+            w, s_, e, n = hit["bbox"]
+            b["polygon"] = [[w, s_], [e, s_], [e, n], [w, n]]
+            b.setdefault("label", hit["name"])
         elif a["type"] == "draw_area":
             if not hit.get("bbox"):
                 notes.append(f"the gazetteer gives no outline for {a['place']}, only a point")
@@ -2005,6 +2131,11 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         'above the highest flood along the line (0.5 when none is said). The map computes the levee and the flood.',
         '- draw_breach: a gap in a levee, then flood again. "line" as for draw_levee; "invert" only when the reader '
         'gave the gap\'s floor level.',
+        '- draw_storm: rain on an area, turned into runoff and routed down every river below it (Route it). '
+        '"rain_mm" and "duration_h" (6 when none is said) as the reader wrote them; "runoff_coefficient" (the share '
+        'of the rain that runs off; 0.3 when none is said) only when the reader gave it; the area: "area": "drawn" '
+        '(the reader draws it, or the storm area already on the map; "this area", "here"), or "place", or "bbox". '
+        'The map computes the runoff and the wave.',
         '- replay: replay a past flood as a story on the map (the rain, the gauge against the model, what the '
         'forecast said, the wave downstream, a screening flood). "place" (a river or a town; or "lat" and "lon", or '
         '"at": "here") and "month" (YYYY-MM). The map lists the floods it has there that month and takes the most '

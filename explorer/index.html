@@ -30,6 +30,7 @@
   <link rel="stylesheet" href="./flood-views.css?v=__BUILD__" />
   <link rel="stylesheet" href="./whatif.css?v=__BUILD__" />
   <link rel="stylesheet" href="./route.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./sketch.css?v=__BUILD__" />
   <link rel="stylesheet" href="./floodsim.css?v=__BUILD__" />
   <link rel="stylesheet" href="./replay.css?v=__BUILD__" />
         </div>
@@ -212,6 +213,14 @@
             <path d="M9.4 12.6c-1.9 0-3.3 1.4-3.5 3.3-.2 1.7-.9 2.6-2.4 3.1 3.4 1.4 7.3.3 7.7-3.2.1-1.2-.5-2.3-1.8-3.2Z" />
           </svg>
         </button>
+        <!-- the sketchpad (#664): draw on the map and see it compute; src/sketch-menu.js, each tool adds itself -->
+        <button id="btn-sketch" class="map-tool" type="button" aria-expanded="false" aria-controls="sketch-menu" hidden
+                aria-haspopup="menu" title="Sketch on the map: a storm and more" aria-label="Sketch on the map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" /><path d="M13.5 7.5l3 3" />
+          </svg>
+        </button>
+        <div id="sketch-menu" class="sketch-menu" role="menu" aria-label="Sketch on the map" hidden></div>
         <button id="btn-time" class="map-tool" type="button" aria-pressed="false" aria-controls="timebar" hidden
                 title="Map date" aria-label="Map date">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
@@ -408,6 +417,45 @@
           <div class="wi-foot">
             <button id="rt-replay" type="button" class="link-btn">Play the wave again</button>
             <button id="rt-edit" type="button" class="link-btn wi-edit">Change the flood</button>
+          </div>
+        </div>
+      </section>
+      <!-- Draw a storm (#670): rain on a drawn area, routed down the rivers on the time bar; src/storm-map.js -->
+      <section id="storm" class="whatif route storm" aria-labelledby="st-title" hidden>
+        <header class="wi-head">
+          <div>
+            <p class="wi-kicker">Draw a storm</p>
+            <h2 id="st-title" class="wi-title">Draw the storm's area</h2>
+            <p class="wi-sub">Its runoff routed down GEOGLOWS's own network</p>
+          </div>
+          <button type="button" class="wi-close st-close" aria-label="Close Draw a storm" title="Close (Esc)">×</button>
+        </header>
+        <form id="st-form" class="wi-form st-form">
+          <label class="wi-slider"><span>Rain</span>
+            <input id="st-rain" type="number" min="1" max="2000" step="any" inputmode="decimal" aria-label="Rain, mm" />
+            <output>mm</output></label>
+          <label class="wi-slider"><span>Over</span>
+            <input id="st-dur" type="range" min="1" max="72" step="1" />
+            <output id="st-dur-out" for="st-dur">6 h</output></label>
+          <label class="wi-slider"><span>Runs off</span>
+            <input id="st-c" type="range" min="0.05" max="1" step="0.05" aria-label="Runoff coefficient" />
+            <output id="st-c-out" for="st-c">0.30</output></label>
+          <p class="st-plain">The runoff coefficient is a plain share of the rain that runs off: no soil, wetness or snow behind it.</p>
+          <div class="wi-run-row">
+            <button id="st-draw" type="button" class="btn small ghost">Draw the area</button>
+            <button id="st-run" type="submit" class="btn small primary">Route the storm</button>
+          </div>
+        </form>
+        <p id="st-status" class="wi-status" role="status" hidden></p>
+        <div id="st-result" class="wi-result" hidden>
+          <p id="st-head" class="rt-head"></p>
+          <div id="st-chart"></div>
+          <dl id="st-facts" class="st-facts"></dl>
+          <p id="st-rule" class="st-rule"></p>
+          <p id="st-model" class="wi-model"></p>
+          <div class="wi-foot">
+            <button id="st-replay" type="button" class="link-btn">Play the wave again</button>
+            <button id="st-edit" type="button" class="link-btn wi-edit">Change the storm</button>
           </div>
         </div>
       </section>
