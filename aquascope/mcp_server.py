@@ -919,7 +919,8 @@ def route_flood(river_id: int | None = None, lat: float | None = None, lon: floa
 
 def flood_reach(river_id: int | None = None, lat: float | None = None, lon: float | None = None,
                 return_period: float | None = None, flow_cms: float | None = None, hours: float | None = None,
-                fine: bool = False, out_dir: str | None = None) -> dict[str, Any]:
+                fine: bool = False, out_dir: str | None = None, levee: Any = None, crest: Any = None,
+                breach: Any = None, invert: Any = None) -> dict[str, Any]:
     """Flood it (#658): a screening flood of a river's valley from a reach (river_id, or lat/lon to snap). The grid
     follows the river and is cut to its valley on the Terrarium terrain; every GEOGLOWS reach entering or starting
     in it is burnt in and fed by its own flow at the same return period as the clicked reach's: return_period
@@ -928,13 +929,17 @@ def flood_reach(river_id: int | None = None, lat: float | None = None, lon: floa
     under 1% in an hour) or the hours cap (72). By default on cells twice as large as the Explorer's GPU grid
     (fine: the GPU grid, slower in numpy). Returns the wet area, the deepest water, the inflows, when it settled,
     the volume budget and the licences; out_dir writes the largest depth as a GeoTIFF and the run as a UGRID
-    NetCDF. A screening flood, not a design flood: no bathymetry, terrain errors of metres. Numbers from code."""
+    NetCDF. A screening flood, not a design flood: no bathymetry, terrain errors of metres. Numbers from code.
+    levee (#663) is a line (GeoJSON, or a list of [lon, lat]) whose cells are raised to crest, an elevation in m
+    above mean sea level (not a height above the ground); breach is a line whose cells are lowered to invert (or
+    to the natural ground). With either, the run is made with and without them: before, after and the change."""
     from pathlib import Path
 
     from aquascope import floodsim
 
+    edits = floodsim.edits_from(levee, crest, breach, invert)
     out = floodsim.flood_reach(river_id, lat, lon, return_period=return_period, flow_cms=flow_cms, hours=hours,
-                               coarse=not fine)
+                               coarse=not fine, edits=edits, compare=bool(edits))
     s = out["summary"]
     if out_dir:
         folder = Path(out_dir)

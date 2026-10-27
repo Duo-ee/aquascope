@@ -140,7 +140,9 @@ benchmark:
   the MCP tools `route_flood` and `route_storm`.
 - **Added since 1.0.0:** `aquascope.paint` (Paint the globe, #657), `aquascope paint` and the MCP tool `paint_map`.
 - **Added in 1.1:** `aquascope.floodsim` (Flood it, a screening flood of a river's valley from a reach, #658),
-  `aquascope flood` and the MCP tool `flood_reach`.
+  `aquascope flood` and the MCP tool `flood_reach`; levees and breaches on its grid (#663: `apply_levee`,
+  `apply_breach`, `edit_grid`, `compare_exposure`), `aquascope flood --levee/--crest/--breach/--invert` and the same
+  arguments of `flood_reach`.
 
 Experimental means:
 

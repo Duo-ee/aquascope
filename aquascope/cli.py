@@ -1199,10 +1199,16 @@ def cmd_flood(args: argparse.Namespace) -> None:
         if series is None:
             print("  --forecast needs a river_id.")
             sys.exit(1)
+    def geo(x: str) -> str:
+        p = Path(x)
+        return p.read_text() if not x.lstrip().startswith(("{", "[")) and p.exists() else x
+
     try:
+        edits = floodsim.edits_from([geo(x) for x in args.levee or []], args.crest or [],
+                                    [geo(x) for x in args.breach or []], args.invert or [])
         out = floodsim.flood_reach(args.river, lat, lon, return_period=args.rp, flow_cms=args.flow, series=series,
-                                   hours=args.hours, coarse=not args.fine)
-    except (LookupError, ValueError, RuntimeError, ImportError) as exc:
+                                   hours=args.hours, coarse=not args.fine, edits=edits, compare=bool(edits))
+    except (LookupError, ValueError, RuntimeError, ImportError, OSError) as exc:
         print(f"  Could not flood this reach: {exc}")
         sys.exit(1)
     s = out["summary"]
@@ -1228,6 +1234,19 @@ def cmd_flood(args: argparse.Namespace) -> None:
           f"same return period.")
     print(f"  {s['wet_km2']:,.2f} km² under water, deepest {s['max_depth_m']:.1f} m, {steady}; {s['nx']} x {s['ny']} "
           f"cells of {s['cell_m']:.1f} m, {s['steps']:,} steps in {s['wall_s']:.0f} s.")
+    for e in s.get("edits", []):
+        if e["kind"] == "levee":
+            print(f"  Levee at {e['crest_m']:g} m ({e['height_m'][0]:g} to {e['height_m'][1]:g} m above the ground), "
+                  f"{e['length_m']:,.0f} m, {e['cells']} cells" +
+                  (f"; it dams a river at {e['channel_cells']} cells" if e["channel_cells"] else ""))
+        else:
+            floor = "the natural ground" if e["invert_m"] is None else f"{e['invert_m']:g} m"
+            print(f"  Breach down to {floor}, {e['length_m']:,.0f} m, {e['lowered']} cells lowered")
+    if s.get("change"):
+        c = s["change"]
+        print(f"  Before: {c['wet_km2_before']:,.2f} km² under water; after: {c['wet_km2_after']:,.2f} km² "
+              f"({c['wet_km2_change']:+,.2f}); kept dry {c['kept_dry_km2']:,.2f} km², newly wet "
+              f"{c['newly_wet_km2']:,.2f} km².")
     for k, v in files.items():
         print(f"  {k}: {v}")
     print(f"  {s['label']}.")
@@ -5004,6 +5023,17 @@ def main() -> None:
     p_flood.add_argument("--fine", action="store_true",
                          help="The Explorer's GPU grid (cells of about 24 m): several minutes in numpy; by default "
                               "cells twice as large, as the Explorer without WebGPU")
+    p_flood.add_argument("--levee", action="append", default=None, metavar="GEOJSON",
+                         help="A levee: a GeoJSON file (or GeoJSON text) of a line; the cells it crosses are raised "
+                              "to --crest. Repeat for several")
+    p_flood.add_argument("--crest", action="append", type=float, default=None, metavar="M",
+                         help="The levee's crest, an elevation in m above mean sea level (the terrain's datum), "
+                              "not a height above the ground: one for every levee, or one each")
+    p_flood.add_argument("--breach", action="append", default=None, metavar="GEOJSON",
+                         help="A breach: a GeoJSON line; the cells it crosses are lowered to --invert, or to the "
+                              "natural ground. Applied after the levees")
+    p_flood.add_argument("--invert", action="append", type=float, default=None, metavar="M",
+                         help="The breach's floor, m above mean sea level (by default the natural ground)")
     p_flood.add_argument("--out-dir", default=".", help="Where to write the files (.)")
     p_flood.add_argument("--format", choices=["geotiff", "netcdf", "both"], default="both",
                          help="geotiff: the largest depth (EPSG:3857); netcdf: the UGRID run that `aquascope mesh` "

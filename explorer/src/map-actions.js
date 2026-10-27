@@ -421,6 +421,15 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       await actions.floodReach({ ...reach, name: a.label || a.where || "" }, a, { by, command, label });
       return log.live().slice(-1)[0];
     }
+    case "draw_levee":
+    case "draw_breach": {
+      // Levees and breaches (#663): floodsim-map.js draws the line (or lets the reader draw it), asks the package for
+      // the crest when the words gave a freeboard, logs the line and floods again; nothing to log here.
+      if (!actions.sketchFlood) throw new Error("Flood it is not on this page");
+      const s = await actions.sketchFlood(a, { by, command, label });
+      if (!s) throw new Error("no line was drawn");
+      return log.live().slice(-1)[0];
+    }
     case "draw_area":
       after = { bbox: a.bbox, label: a.label || a.where || "" };
       drawArea(id, after);
@@ -549,6 +558,8 @@ const ICON = {
   what_if: '<path d="M4 17c3 0 3-3 6-3s3 3 6 3 2-2 4-2"/><path d="M9 4.5a3 3 0 1 1 3 3.5v1.6"/><path d="M12 11.6h.01"/>',
   route: '<path d="M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/><path d="M6 9c1.5-3 3-4 4.5-4S13 7 14 9s2.5 3 4 2"/>',
   flood_reach: '<path d="M3 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M3 19c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M12 3v7M9 7l3 3 3-3"/>',
+  draw_levee: '<path d="M3 17h18"/><path d="M5 17l3-6h8l3 6"/><path d="M3 21c2.5 0 2.5-1.5 5-1.5S10.5 21 13 21"/>',
+  draw_breach: '<path d="M3 17h7M14 17h7"/><path d="M5 17l3-6h2M14 11h2l3 6"/><path d="M11 13l1 4 1-4"/>',
 };
 
 const icon = (type) => `<svg class="ma-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +
