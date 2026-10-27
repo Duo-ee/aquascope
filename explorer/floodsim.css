@@ -101,7 +101,10 @@
 .fsk-handle.fsk-breach { border-color: #d1242f; }
 
 @media (max-width: 640px) {
-  .fsk-bar { top: auto; bottom: 110px; }
+  .fsk-bar { top: 112px; }
+  .floodit.drawing { display: none; }   /* the whole map to draw on; the sheet comes back with the crest control */
   .floodit.done .fi-sketch .fi-crest-row small { display: none; }
   .fi-prof { height: 64px; }
+  /* setting a crest on a phone: the control has the sheet, the flows and the views step aside */
+  .floodit.crest .fi-flows, .floodit.crest .fi-views, .floodit.crest .fi-head { display: none; }
 }

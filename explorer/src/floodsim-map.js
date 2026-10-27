@@ -49,7 +49,7 @@ const CHOICES = [2, 10, 25, 50, 100];
 const DOCS = "https://rekin226.github.io/aquascope/floodsim/";
 const JRC_LINE = "Where it differs from JRC's 100-year map: it floods the small streams JRC leaves out, and it is " +
   "1.5 m to 2.7 m shallower on the plain on the reaches checked, mostly because GEOGLOWS's 100-year flows there are " +
-  "1.5 to 3.4 times smaller than GloFAS's, which JRC's maps are made from. No bathymetry, no defences.";
+  "1.5 to 3.4 times smaller than GloFAS's, which JRC's maps are made from. No bathymetry, and no defences but the ones you draw.";
 
 let target = null;       // { river_id, lat, lon, name }
 let plan = null;         // the worker's plan for target
@@ -609,6 +609,7 @@ function render() {
     ${picker}${flowLine}${st}${result}${run && !status ? sketchBlock(run) : ""}
     <p class="fi-credit">${escapeHtml(LABEL)}. ${inViews && currentMesh() ? '<button type="button" class="link-btn" data-act="back">Back to Flood it</button> · ' : ""}<button type="button" class="link-btn" data-act="clear">Clear</button></p>`;
   panel().classList.toggle("done", Boolean(run && !status));
+  panel().classList.toggle("crest", Boolean(run && !status && pending));
   panel().classList.toggle("mini", Boolean(run && inViews === run && currentMesh()));
 }
 
@@ -703,7 +704,8 @@ export async function drawSketch(kind, opts = {}) {
     pending = null;
     selected = null;
     render();
-    line = await startLineDraw(kind);
+    if (panel()) panel().classList.add("drawing");
+    try { line = await startLineDraw(kind); } finally { if (panel()) panel().classList.remove("drawing"); }
   }
   if (!line) { render(); return null; }
   let profile;
@@ -723,10 +725,17 @@ export async function drawSketch(kind, opts = {}) {
   pending = { id, profile, crest: s.crest ?? null };
   drawSketches(sketches, { selected });
   render();
+  if (phone()) fitLine(line);   // the sheet came back over the map: keep the line in sight above it
   announce(kind === "levee" ? `A levee at ${fmt(s.crest, 1)} metres, ${fmt(profile.length_m, 0)} metres long. Set its crest, then Run again.`
     : "A breach. Run again to see the water come through it.");
   if (opts.run) await runAgain({ by: opts.by });
   return s;
+}
+
+function fitLine(line) {
+  if (!state.mapOk || !map || !line || !line.length) return;
+  const xs = line.map((p) => p[0]), ys = line.map((p) => p[1]);
+  map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: padding(), maxZoom: 16, duration: 500 });
 }
 
 async function editSketch(id) {

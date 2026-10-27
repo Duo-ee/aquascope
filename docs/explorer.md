@@ -561,6 +561,15 @@ scheme, the checks against JRC's 100-year map at four places and the speed are i
 
 ![Flood it on the Severn and the Avon at Tewkesbury](img/floodsim/severn-desktop.jpg)
 
+**Levees and breaches.** Under a run, **Draw a levee** draws a line on the map (tap its points, or drag a straight
+line). A small control shows the ground and the flood along it and suggests a crest 0.5 m above the flood; **Run
+again** floods the same valley with the levee in the terrain, and the new run sits beside the old one in the swipe,
+with what gets flooded before and after (buildings, roads and people, and the change). **Draw a breach** opens a gap.
+Each line can be moved, re-set and removed, and each change is in the undo log; Ask the map reads "draw a levee 1 m
+above the flood" and "breach the levee". See [Levees and breaches](floodsim.md#levees-and-breaches).
+
+![A levee drawn round Upton upon Severn, before and after in the swipe](img/floodsim/levee-swipe-desktop.jpg)
+
 ## Map layers
 
 The rail is a layer stack, and every layer in it is keyless and free to use.
