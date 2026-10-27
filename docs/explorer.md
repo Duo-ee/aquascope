@@ -559,7 +559,7 @@ run in the flood views: hazard, arrival, a section and what gets flooded. Two ru
 reads "flood Upton upon Severn at the 100-year flow". A screening flood: no bathymetry, terrain errors of metres. The
 scheme, the checks against JRC's 100-year map at four places and the speed are in [Flood it](floodsim.md).
 
-![Flood it on the Severn and the Avon at Tewkesbury](img/floodsim/severn-desktop.png)
+![Flood it on the Severn and the Avon at Tewkesbury](img/floodsim/severn-desktop.jpg)
 
 ## Map layers
 

@@ -38,7 +38,7 @@
 
 /* while the run is open in the flood views: a strip at the top right, so the views' own panels have the map */
 .floodit.mini { top: 64px; bottom: auto; }
-.floodit.mini .fi-flows, .floodit.mini .fi-more, .floodit.mini .fi-flow, .floodit.mini .fi-how { display: none; }
+.floodit.mini .fi-more, .floodit.mini .fi-flow, .floodit.mini .fi-how { display: none; }
 
 /* a phone: a bottom sheet, folded to the answer after a run so the flood above shows */
 @media (max-width: 640px) {

@@ -5,7 +5,7 @@
 The valley floods at the reach's 100-year flow, every river in it fed at the same return period, and the depth is
 drawn on the map as the water spreads, on your own GPU. Nothing runs on a server.
 
-![Flood it on the Severn and the Avon at Tewkesbury, steady after 33 h](img/floodsim/severn-desktop.png)
+![Flood it on the Severn and the Avon at Tewkesbury, steady after 33 h](img/floodsim/severn-desktop.jpg)
 
 It is a **screening flood**, never a design flood. The terrain has no bathymetry and vertical errors of metres, the
 channel is one cell wide, every river is at the same return period at once, and there are no defences the terrain
@@ -25,7 +25,23 @@ does not show. The panel says so every time.
 Ask the map does the same from words: "flood Upton upon Severn at the 100-year flow", "flood here with 500 m3/s",
 "flood this river with the forecast peak". Every run is in the action log, and undo takes it back.
 
-![The flow picker and how the run went](img/floodsim/severn-picker.png)
+![The flow picker and how the run went](img/floodsim/severn-picker.jpg)
+
+| | |
+| --- | --- |
+| ![Hazard H1 to H6](img/floodsim/severn-hazard.jpg) | ![Arrival](img/floodsim/severn-arrival.jpg) |
+| ![A section across the valley](img/floodsim/severn-section.jpg) | ![What gets flooded](img/floodsim/severn-exposure.jpg) |
+| ![The 10-year flow against the 100-year with the swipe](img/floodsim/severn-compare.jpg) | ![The Cedar River at Cedar Rapids, Iowa](img/floodsim/cedar-desktop.jpg) |
+
+On a phone the panel is a sheet that folds to the answer after a run:
+
+| | | | |
+| --- | --- | --- | --- |
+| ![Phone: the Severn](img/floodsim/severn-phone.jpg) | ![Phone: hazard](img/floodsim/severn-phone-hazard.jpg) | ![Phone: a section](img/floodsim/severn-phone-section.jpg) | ![Phone: the swipe](img/floodsim/severn-phone-compare.jpg) |
+
+Without WebGPU the worker runs cells twice as large and says so:
+
+![The Severn on the worker, without WebGPU](img/floodsim/severn-worker.jpg)
 
 ## What runs
 
@@ -209,7 +225,7 @@ Headless Chrome on an Apple M4 Max (WebGPU on Metal), other jobs running at the 
 | Reach | Engine | Grid | Steady after (model time) | Wall time | Steps |
 | --- | --- | --- | --- | --- | --- |
 | Severn, in the Explorer | WebGPU | 398,208 cells of 23.5 m | 33 h | 4.5 s (first frame after 0.08 s) | 74,973 |
-| Severn, in the Explorer | worker, no WebGPU | WORKER_CELLS cells of WORKER_DX m | WORKER_STEADY h | WORKER_WALL s | WORKER_STEPS |
+| Severn, in the Explorer | worker, no WebGPU | 99,552 cells of 47.0 m | 35 h | 60 s (first frame after 0.3 s) | 38,501 |
 | Thames | WebGPU | 299,754 cells of 23.7 m | 27 h | 2.8 s | 56,690 |
 | Ahr | WebGPU | 357,512 cells of 24.3 m | 66 h | 9.7 s | 187,379 |
 | Cedar River | WebGPU | 325,850 cells of 28.4 m | 21 h | 2.7 s | 53,698 |

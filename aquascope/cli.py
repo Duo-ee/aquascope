@@ -1230,7 +1230,6 @@ def cmd_flood(args: argparse.Namespace) -> None:
           f"cells of {s['cell_m']:.1f} m, {s['steps']:,} steps in {s['wall_s']:.0f} s.")
     for k, v in files.items():
         print(f"  {k}: {v}")
-    print(f"  summary: {s['files']['summary_json']}")
     print(f"  {s['label']}.")
 
 
