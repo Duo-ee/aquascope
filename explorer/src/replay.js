@@ -33,6 +33,12 @@ let marker = null;
 let busy = null;         // "gif" | "video" while exporting
 
 const panel = () => $("replay");
+const inPanel = (sel) => panel().querySelector(sel);
+function showBody(html) {
+  $("rp-stop").hidden = true;
+  $("rp-body").hidden = false;
+  $("rp-body").innerHTML = html;
+}
 const narrow = () => (globalThis.innerWidth || 1024) <= 640;
 const still = () => Boolean(globalThis.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
 const day = (iso) => {
@@ -61,20 +67,20 @@ export function openReplayPicker(t) {
   p.classList.remove("playing");
   const d = (state.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   $("rp-title").textContent = t.name || `River reach ${t.river_id}`;
-  $("rp-body").innerHTML = `<form class="rp-pick" id="rp-pick">
+  showBody(`<form class="rp-pick" id="rp-pick">
       <label>The flood's date <input type="date" id="rp-date" value="${escapeHtml(d)}" max="${new Date().toISOString().slice(0, 10)}" min="2000-06-01"></label>
       <button type="submit" class="btn tiny primary">Replay</button></form>
     <p class="rp-hint muted">The days around it: the rain, the gauge against GEOGLOWS, what the forecast said, the wave and the flood.</p>
-    <div id="rp-cands" class="rp-cands"></div>`;
+    <div id="rp-cands" class="rp-cands"></div>`);
   $("rp-ctrl").hidden = true;
-  $("rp-pick").addEventListener("submit", (e) => {
+  inPanel("#rp-pick").addEventListener("submit", (e) => {
     e.preventDefault();
-    const v = $("rp-date").value;
+    const v = inPanel("#rp-date").value;
     if (v) startReplay({ river_id: t.river_id, lat: t.lat, lon: t.lon, start: v, end: v });
   });
   const ym = d.slice(0, 7);
   call("replay", { op: "candidates", args: { lat: t.lat, lon: t.lon, start: ym, end: ym, radius_km: 30 } }).then((res) => {
-    const box = $("rp-cands");
+    const box = inPanel("#rp-cands");
     if (!box || !res || !(res.candidates || []).length) return;
     box.innerHTML = `<p class="muted">Floods in the news near here, ${escapeHtml(day(`${ym}-15`).replace(/^\d+ /, ""))}:</p>` +
       res.candidates.slice(0, 3).map((c, k) => `<button type="button" class="btn tiny" data-k="${k}">${escapeHtml(day(c.start))}` +
@@ -138,7 +144,7 @@ export async function startReplay(ev, { by = "rules", label = "", command = "" }
   } catch (err) {
     if (my === run) {
       $("rp-title").textContent = "Could not replay this flood";
-      $("rp-body").innerHTML = `<p class="rp-err">${escapeHtml(err.message)}</p>`;
+      showBody(`<p class="rp-err">${escapeHtml(err.message)}</p>`);
     }
     return null;
   } finally {
@@ -151,9 +157,9 @@ const replayAction = (ev) => ({ ...(ev.river_id ? { river_id: ev.river_id } : {}
 function renderBuild(record, lines) {
   const rows = record ? pieceRows(record) : [];
   const mark = { ok: "✓", missing: "–", pending: "…", waiting: "·" };
-  $("rp-body").innerHTML = `<ul class="rp-build">${rows.map((r) => `<li class="${r.state}"><i aria-hidden="true">${mark[r.state]}</i>` +
+  showBody(`<ul class="rp-build">${rows.map((r) => `<li class="${r.state}"><i aria-hidden="true">${mark[r.state]}</i>` +
     `<span>${escapeHtml(r.label)}${r.text ? ` <small>${escapeHtml(r.text)}</small>` : ""}</span></li>`).join("")}</ul>` +
-    (lines.length ? `<p class="rp-progress" role="status"><span class="spinner" aria-hidden="true"></span>${escapeHtml(lines.at(-1))}</p>` : "");
+    (lines.length ? `<p class="rp-progress" role="status"><span class="spinner" aria-hidden="true"></span>${escapeHtml(lines.at(-1))}</p>` : ""));
 }
 
 // ── the player ──────────────────────────────────────────────────────────────
@@ -164,8 +170,9 @@ function showPlayer() {
   document.body.classList.add("rp-on");
   $("rp-title").textContent = cur.story.event.name;
   $("rp-ctrl").hidden = false;
-  $("rp-body").innerHTML = `<div class="rp-stop"><div class="rp-text"><p class="rp-stitle" id="rp-stitle"></p>
-    <p class="rp-note" id="rp-note" aria-live="polite"></p></div><div class="rp-chart" id="rp-chart"></div></div>`;
+  $("rp-body").innerHTML = "";
+  $("rp-body").hidden = true;
+  $("rp-stop").hidden = false;
   const segs = scrubSegments(cur.stops);
   $("rp-scrub").innerHTML = segs.map((s) => `<button type="button" class="rp-seg" data-i="${s.i}" style="flex-grow:${(s.width * 100).toFixed(2)}" ` +
     `title="${escapeHtml(cur.stops[s.i].title)}" aria-label="${escapeHtml(`Stop ${s.i + 1}: ${cur.stops[s.i].title}`)}"><span></span></button>`).join("");

@@ -820,7 +820,8 @@ def flood(river_id: int, flow_cms: float, *, flow_source: str, lat: float | None
         piece["exposure"] = _missing("exposure", "Nothing is under water.")
         return piece
     rows, cols = np.nonzero(wet)
-    lon0, lat0 = floodsim.cell_lonlat(g, np.array([rows.min(), rows.max() + 1]), np.array([cols.min(), cols.max() + 1]))
+    lon0, lat0 = floodsim.cell_lonlat(g["window"], np.array([rows.min() - 1, rows.max() + 1]),
+                                      np.array([cols.min() - 1, cols.max() + 1]))
     w, e = float(min(lon0)), float(max(lon0))
     s_, n_ = float(min(lat0)), float(max(lat0))
     clon = float(lon) if lon is not None else (w + e) / 2
