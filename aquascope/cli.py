@@ -1252,6 +1252,77 @@ def cmd_flood(args: argparse.Namespace) -> None:
     print(f"  {s['label']}.")
 
 
+def cmd_replay(args: argparse.Namespace) -> None:
+    """`aquascope replay`: a past flood assembled from its data and told as a story (#659): the event record, the
+    story JSON and a short Markdown report."""
+    from pathlib import Path
+
+    from aquascope import replay
+
+    for name in ("aquascope", "httpx"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    if args.candidates:
+        if not args.at or not (args.month or args.start):
+            print("  --candidates needs --at LAT LON and --month (or --start/--end).")
+            sys.exit(1)
+        c = replay.candidates(args.at[0], args.at[1], month=args.month, start=args.start, end=args.end)
+        if args.json:
+            print(json.dumps(c, indent=2, ensure_ascii=False))
+            return
+        print(f"  {c['note']}")
+        for x in c["candidates"]:
+            print(f"  {x['rank']}. {x['start']} to {x['end']}: {x['reports']:,} reports, centred at "
+                  f"{x['lat']:.3f}, {x['lon']:.3f}")
+        return
+    event = None
+    lat, lon = (args.at or (None, None))
+    start, end = args.start, args.end
+    if args.month and not start:
+        if lat is None:
+            print("  --month needs --at LAT LON (where to look in Floods past).")
+            sys.exit(1)
+        c = replay.candidates(lat, lon, month=args.month)
+        if not c["candidates"]:
+            print(f"  {c['note']}")
+            sys.exit(1)
+        pick = max(1, min(int(args.pick), len(c["candidates"])))
+        event = c["candidates"][pick - 1]
+        print(f"  Floods past: {event['start']} to {event['end']}, {event['reports']:,} reports (candidate {pick} of "
+              f"{len(c['candidates'])}).")
+    elif not start:
+        print("  Give --start (and --end), or --month with --at.")
+        sys.exit(1)
+    if args.river is None and lat is None:
+        print("  Give a river_id, or --at LAT LON.")
+        sys.exit(1)
+    say = (lambda m: None) if args.json else (lambda m: print(f"  {m}", flush=True))
+    try:
+        rec = replay.event_record(args.river, lat=lat, lon=lon, start=start, end=end, event=event,
+                                  with_flood=not args.no_flood, coarse=not args.fine, progress=say)
+    except (LookupError, ValueError, RuntimeError, ImportError, OSError) as exc:
+        print(f"  Could not replay this flood: {exc}")
+        sys.exit(1)
+    st = replay.story(rec)
+    md = replay.report(rec, st)
+    folder = Path(args.out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = f"replay-{rec['peak'].get('river_id') or rec['reach']['river_id']}-{(rec['peak'].get('date') or start)}"
+    files = {"record": folder / f"{stem}-record.json", "story": folder / f"{stem}-story.json",
+             "report": folder / f"{stem}.md"}
+    files["record"].write_text(json.dumps(rec, indent=1, ensure_ascii=False, default=str))
+    files["story"].write_text(json.dumps(st, indent=1, ensure_ascii=False, default=str))
+    files["report"].write_text(md)
+    if args.json:
+        print(json.dumps({"story": st, "files": {k: str(v) for k, v in files.items()}}, indent=2,
+                         ensure_ascii=False, default=str))
+        return
+    print(f"  {st['title']}")
+    for i, stop in enumerate(st["stops"], start=1):
+        print(f"  {i}. {stop['title']}: {stop['note']}")
+    for k, v in files.items():
+        print(f"  {k}: {v}")
+
+
 def cmd_route(args: argparse.Namespace) -> None:
     """`aquascope route flood|storm|check`: a flood wave down GEOGLOWS's own river network, Muskingum routing (#656)."""
     from aquascope import routing
@@ -5039,6 +5110,23 @@ def main() -> None:
                          help="geotiff: the largest depth (EPSG:3857); netcdf: the UGRID run that `aquascope mesh` "
                               "and the Explorer's model viewer read; both (the default)")
     p_flood.add_argument("--json", action="store_true")
+    # ── replay an event (#659) ──────────────────────────────────────
+    p_replay = sub.add_parser("replay", help="Replay a past flood: the rain (IMERG), the gauges against GEOGLOWS, "
+                              "what the forecast said, the wave (Route it) and a screening flood (Flood it), as a "
+                              "story JSON and a Markdown report")
+    p_replay.add_argument("river", nargs="?", type=int, default=None, help="A GEOGLOWS v2 river_id")
+    p_replay.add_argument("--at", nargs=2, type=float, metavar=("LAT", "LON"),
+                          help="Where the flood was: the largest river within 12 km is replayed")
+    p_replay.add_argument("--start", default=None, help="The event's first day, YYYY-MM-DD")
+    p_replay.add_argument("--end", default=None, help="Its last day (the start by default)")
+    p_replay.add_argument("--month", default=None, help="Or a month (YYYY-MM): the flood Floods past has near --at")
+    p_replay.add_argument("--pick", type=int, default=1, help="With --month: which of Floods past's floods (1, the "
+                          "most reported, by default)")
+    p_replay.add_argument("--candidates", action="store_true", help="List Floods past's floods near --at in --month")
+    p_replay.add_argument("--no-flood", action="store_true", help="Leave out Flood it (it takes a few minutes)")
+    p_replay.add_argument("--fine", action="store_true", help="Flood it on the GPU's grid (slower in numpy)")
+    p_replay.add_argument("--out-dir", default=".", help="Where to write the record, the story and the report (.)")
+    p_replay.add_argument("--json", action="store_true")
     # ── route it (#656) ─────────────────────────────────────────────
     p_route = sub.add_parser("route", help="A flood wave down GEOGLOWS's own river network (Muskingum routing): "
                              "the Explorer's Route a flood from here")
@@ -6003,6 +6091,7 @@ def main() -> None:
         "whatif": cmd_whatif,
         "route": cmd_route,
         "flood": cmd_flood,
+        "replay": cmd_replay,
         "swmm": cmd_swmm,
         "river": cmd_river,
         "evidence": cmd_evidence,

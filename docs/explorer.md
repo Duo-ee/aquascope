@@ -570,6 +570,20 @@ above the flood" and "breach the levee". See [Levees and breaches](floodsim.md#l
 
 ![A levee drawn round Upton upon Severn, before and after in the swipe](img/floodsim/levee-swipe-desktop.jpg)
 
+## Replay a flood
+
+A past flood told as a story on the map. In **Floods past**, a news circle's card lists the floods its reports make,
+each with **Replay**; a river's or a gauge's card has **Replay** too, for a date you give. AquaScope gathers the
+event (IMERG's rain over the upstream basin, the gauges against GEOGLOWS, what GEOGLOWS's forecast said 1, 3 and 7
+days before the peak, the observed flow routed downstream with Route it, and Flood it at the peak with what was under
+the water) and plays it: the camera flies between stops, the time bar moves, the layers change, and a small note at the
+bottom (a sheet on a phone) says what each stop shows. Play, pause, step and scrub; export a GIF, a WebM video or a
+Markdown report; copy a link that replays it. Ask the map reads "replay the Severn flood of November 2024". Every
+number in a note is written by code from the data. The pieces, the story format and the checks on two events (the
+Severn in Storm Bert and the French Broad in Hurricane Helene) are in [Replay an event](replay.md).
+
+![Replay: the gauge at Saxons Lode against GEOGLOWS, November 2024](img/replay/severn-gauge-desktop.jpg)
+
 ## Map layers
 
 The rail is a layer stack, and every layer in it is keyless and free to use.

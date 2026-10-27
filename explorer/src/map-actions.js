@@ -53,6 +53,9 @@ function setLayer(id, on) {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+/** A layer on or off as its control would (Replay an event, #659, turns the rain and Floods past on per stop). */
+export function setMapLayer(id, on) { setLayer(id, on); }
+
 function readView() {
   const c = map.getCenter();
   return { center: [c.lng, c.lat], zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
@@ -419,6 +422,21 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       const reach = a.at === "here" ? hereReach() : await snapRiver(a);
       if (!reach) throw new Error("select a river first (click one), or name a place");
       await actions.floodReach({ ...reach, name: a.label || a.where || "" }, a, { by, command, label });
+      return log.live().slice(-1)[0];
+    }
+    case "replay": {
+      // Replay an event (#659): the code lists Floods past's floods there that month and replay.js assembles and
+      // plays the one picked (the most reported unless the action says another); it logs it; nothing to log here.
+      if (!actions.startReplay) throw new Error("Replay is not on this page");
+      const at = a.at === "here" ? hereReach() : { lat: a.lat, lon: a.lon };
+      if (!at || at.lat === undefined || at.lat === null) throw new Error("select a river first (click one), or name a place");
+      const res = await call("replay", { op: "candidates", args: { lat: at.lat, lon: at.lon, month: a.month, radius_km: 40 } });
+      const list = (res && res.candidates) || [];
+      if (!list.length) throw new Error((res && res.note) || `no flood in Floods past near there in ${a.month}`);
+      const c = list[Math.min(list.length, a.pick || 1) - 1];
+      const story = await actions.startReplay({ ...(at.river_id ? { river_id: at.river_id } : {}), lat: c.lat, lon: c.lon,
+        start: c.start, end: c.end, reports: c.reports }, { by, label, command });
+      if (!story) throw new Error("the replay could not be assembled");
       return log.live().slice(-1)[0];
     }
     case "draw_levee":

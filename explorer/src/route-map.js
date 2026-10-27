@@ -319,6 +319,24 @@ export async function routeFlood(t, args, { by = "rules", command = "", label = 
   }
 }
 
+/**
+ * Draw a wave the package already routed (Replay an event, #659: the observed flow at a gauge, routed with
+ * aquascope.routing.route in the record) and play it on the time bar, without the panel. Logged as a route, so undo
+ * takes it off. `frame` false leaves the camera to the caller.
+ */
+export function showRouted(result, t, { frame = false, label = "", by = "rules" } = {}) {
+  const before = slotValue("route");
+  const value = { result, target: { ...t, river_id: Number(t.river_id) } };
+  target = value.target;
+  paint(value, { frame, play: true });
+  logAction({ action: { type: "route", river_id: t.river_id, inflow: "series" }, before, after: value,
+    label: label || logLabel(result), by, detail: (result.inflow && result.inflow.source) || "" });
+  return value;
+}
+
+/** Take the wave off the map (a replay moving on from its wave stop). */
+export function clearRouted() { if (shown) paint(null); }
+
 // The path is framed now, so the basemap's labels along it are loaded: the towns not placed yet are placed on it.
 async function addTowns(value) {
   await new Promise((r) => setTimeout(r, 1800));

@@ -31,6 +31,7 @@
   <link rel="stylesheet" href="./whatif.css?v=__BUILD__" />
   <link rel="stylesheet" href="./route.css?v=__BUILD__" />
   <link rel="stylesheet" href="./floodsim.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./replay.css?v=__BUILD__" />
         </div>
       </section>
   <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
@@ -341,6 +342,35 @@
              aria-valuemin="5" aria-valuemax="95" aria-valuenow="50"><span aria-hidden="true">‹ ›</span></div>
       </div>
       <section id="floodit" class="whatif floodit" aria-labelledby="fi-title" hidden></section>
+      <!-- Replay an event (#659): a past flood as a story on the map; src/replay.js plays it, replay.css -->
+      <section id="replay" class="replay" aria-labelledby="rp-title" hidden>
+        <header class="rp-head">
+          <p class="rp-kicker">Replay</p>
+          <h2 id="rp-title" class="rp-title">A flood</h2>
+          <button id="rp-close" class="rp-close" type="button" aria-label="Close the replay" title="Close">×</button>
+        </header>
+        <div id="rp-body" class="rp-body"></div>
+        <div id="rp-stop" class="rp-stop" hidden>
+          <div class="rp-text"><p id="rp-stitle" class="rp-stitle"></p><p id="rp-note" class="rp-note" aria-live="polite"></p></div>
+          <div id="rp-chart" class="rp-chart" hidden></div>
+        </div>
+        <div id="rp-ctrl" class="rp-ctrl" hidden>
+          <button id="rp-prev" class="rp-btn" type="button" aria-label="Previous stop" title="Previous stop (←)">‹</button>
+          <button id="rp-play" class="rp-btn rp-play" type="button" aria-label="Play" aria-pressed="false" title="Play or pause">▶</button>
+          <button id="rp-next" class="rp-btn" type="button" aria-label="Next stop" title="Next stop (→)">›</button>
+          <div id="rp-scrub" class="rp-scrub" role="group" aria-label="The story's stops"></div>
+          <span id="rp-count" class="rp-count" aria-live="off"></span>
+          <button id="rp-more" class="rp-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Export and share" title="Export and share">⋯</button>
+          <div id="rp-menu" class="rp-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-act="gif">Make a GIF</button>
+            <button type="button" role="menuitem" data-act="video">Record a video (WebM)</button>
+            <button type="button" role="menuitem" data-act="report">The report (Markdown)</button>
+            <button type="button" role="menuitem" data-act="link">Copy the link</button>
+            <p id="rp-export" class="rp-export" role="status"></p>
+          </div>
+        </div>
+        <p id="rp-src" class="rp-src"></p>
+      </section>
       <section id="route" class="whatif route" aria-labelledby="rt-title" hidden>
         <header class="wi-head">
           <div>

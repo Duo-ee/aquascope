@@ -963,6 +963,37 @@ async function exposureBeforeAfter() {
   }
 }
 
+/**
+ * What is under the run on the map (Replay an event, #659): the buildings, the road length and the people under its
+ * largest depth, counted by the package as the flood views count them (compare_exposure with a dry grid before),
+ * inside the wet cells' box (at most 900 km², around the reach when larger). Returns the package's answer.
+ */
+export async function exposureOfShown() {
+  const run = shown;
+  if (!run || !target) return null;
+  const n = run.over.length;
+  const dry = new Float32Array(n);
+  const box = changeBox(dry, run.over, run.g.nx, run.g.ny);
+  if (!box) return { buildings: { before: 0, after: 0, change: 0 }, roads_km: { before: 0, after: 0, change: 0 },
+    people: { before: 0, after: 0, change: 0 }, kept_dry: [], newly_flooded: [], sources: {} };
+  let [w, nn] = pxLonLat(run.win.x0 + box.c0, run.win.y0 + box.r0, run.win.zoom);
+  let [e, s] = pxLonLat(run.win.x0 + box.c1 + 1, run.win.y0 + box.r1 + 1, run.win.zoom);
+  const kx = 111.32 * Math.cos(((s + nn) / 2) * Math.PI / 180);
+  if ((e - w) * kx * (nn - s) * 110.57 > 880) {
+    const half = Math.sqrt(880) / 2, lon = Number(target.lon), lat = Number(target.lat);
+    w = Math.max(w, lon - half / kx); e = Math.min(e, lon + half / kx);
+    s = Math.max(s, lat - half / 110.57); nn = Math.min(nn, lat + half / 110.57);
+  }
+  const read = await callLight("flood_exposure", { bbox: [w, s, e, nn] }, { priority: 2 });
+  const both = new Float32Array(2 * n);
+  both.set(run.over, n);
+  const res = await floodsim("exposure", { river_id: target.river_id, edits: run.edits, read }, both);
+  return { ...res, bbox: [w, s, e, nn] };
+}
+
+/** The buildings under the run on the map, red, from exposureOfShown's answer (a replay's exposure stop, #659). */
+export function drawExposureOf(res) { if (res && res.newly_flooded) drawExpo(res, null); }
+
 /** Ask the map's draw_levee and draw_breach (aquascope.map_commands): the model picks the line and the crest, this
  * draws it, computes nothing itself, and floods again. */
 export async function sketchAction(a, { by = "rules", command = "", label = "" } = {}) {

@@ -60,6 +60,7 @@ import { initWhatIf } from "./src/whatif-map.js?v=__BUILD__";  // What if, on th
 import { initRoute } from "./src/route-map.js?v=__BUILD__";  // Route it (#656)
 import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
 import { initFloodIt } from "./src/floodsim-map.js?v=__BUILD__";  // Flood it, a screening flood on the GPU (#658)
+import { initReplay } from "./src/replay.js?v=__BUILD__";  // Replay an event, a past flood as a story (#659)
 
 import { initMetrics } from "./src/metrics-ui.js?v=__BUILD__";
 
@@ -218,6 +219,7 @@ function bringMapOnline(url) {
   initRoute();        // its slot in the action log (#656)
   initPaint();        // Paint this view, and its slot in the action log (#657)
   initFloodIt();      // Flood it on the reach card, and its slot in the action log (#658)
+  initReplay();       // Replay on the reach card and in Floods past, a #rp= link, its slot in the log (#659)
   // A selection made while the map was still dark has nothing on the map yet.
   if (state.selected) {
     highlightStation(`${state.selected.source}/${state.selected.station_id}`);
