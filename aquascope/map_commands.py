@@ -57,6 +57,7 @@ ACTION_TYPES = (
     "draw_levee", "draw_breach",
     "replay",
     "drop_well",
+    "change_landuse",
     "draw_storm",
     "draw_reservoir",
 )
@@ -79,6 +80,25 @@ SKETCHES = ("draw_levee", "draw_breach")
 WELL_LIMITS = {"rate_m3_day": (0.1, 1_000_000.0), "days": (0.001, 36_500.0),
                "transmissivity_m2_day": (0.01, 1_000_000.0), "storativity": (1e-7, 0.5)}
 WELL_DEFAULT_RATE = 1000.0
+#: Change land use (#661): what a drawn area can become (aquascope.sketch.landuse.USES), and the bounds.
+LANDUSE_LIMITS = {"rain_mm": (1.0, 2000.0), "impervious_pct": (0.0, 100.0), "points": 200}
+#: Words for each use, for the keyless rules ("build houses here", "pave this area", "plant woods").
+LANDUSE_WORDS: dict[str, str] = {
+    "residential_1_8": r"town ?houses|terraced houses|terraces|dense housing|flats|apartments",
+    "residential_1_4": r"houses|homes|housing|residential|a (?:housing )?estate|a suburb|suburbs|"
+                       r"built (?:over|up|on)|urbani[sz]ed|developed|development",
+    "residential_1_2": r"large gardens|half[- ]acre lots",
+    "residential_1_acre": r"acre lots|large lots",
+    "commercial": r"shops|offices|commercial|business(?: park)?|retail|a (?:shopping )?mall|shopping cent(?:re|er)",
+    "industrial": r"factor(?:y|ies)|industrial(?: estate| park| zone)?|warehouses?|an industrial estate",
+    "paved": r"a car ?park|parking(?: lots?)?|paved|tarmac|asphalt|concrete|roofs",
+    "newly_graded": r"a construction site|construction|bare earth|graded|bulldozed|cleared",
+    "open_space_good": r"a park|parks?|lawns?|open space|playing fields|a golf course",
+    "row_crops": r"crops|cropland|farmland|arable(?: land)?|fields|maize|corn",
+    "pasture_good": r"pasture|grassland|grass|grazing",
+    "meadow": r"(?:a )?meadow|hay",
+    "woods_good": r"woods?|woodland|(?:a )?forest|trees",
+}
 #: Draw a storm (#670): a storm's rain in mm, its hours and its runoff coefficient, the points its outline may
 #: have, and what is used when the words do not say (aquascope.routing.route_storm's own defaults).
 STORM_LIMITS = {"rain_mm": (0.0, 2000.0), "duration_h": (0.0, 720.0), "runoff_coefficient": (0.0, 1.0),
@@ -308,6 +328,12 @@ def _place_text(raw: str) -> str:
 MODEL_CONTROLS = ("review", "explain")
 
 
+def _landuse_uses() -> tuple[str, ...]:
+    from aquascope.sketch.landuse import USES
+
+    return USES
+
+
 def action_schema(places: list[str] | None = None, layers: list[str] | None = None) -> dict[str, Any]:
     """The JSON Schema a model's reply is held to: ``{"actions": [ {type, ...}, ... ]}``.
 
@@ -378,20 +404,28 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "days": {"type": "number", "description": "drop_well: days of pumping"},
                         "transmissivity": {"type": "number", "description": "drop_well: m2/day, only when given"},
                         "storativity": {"type": "number", "description": "drop_well: dimensionless, only when given"},
+                        "use": {"type": "string", "enum": list(_landuse_uses()),
+                                "description": "change_landuse: what the drawn area becomes (TR-55's covers)"},
+                        "soil_group": {"type": "string", "enum": ["A", "B", "C", "D"],
+                                       "description": "change_landuse: the hydrologic soil group, only when given"},
+                        "impervious_pct": {"type": "number", "description": "change_landuse with use impervious: "
+                                                                            "the percent impervious"},
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
                         "rain_mm": {"type": "number",
-                                    "description": "draw_storm: the rain, mm, as the reader wrote it"},
+                                    "description": "draw_storm: the rain, mm, as the reader wrote it; "
+                                                   "change_landuse: the 24-hour design storm, only when given"},
                         "runoff_coefficient": {"type": "number",
                                                "description": "draw_storm: the share of the rain that runs off, "
                                                               "only when the reader gave it"},
                         "area": {"type": "string", "enum": ["drawn"],
-                                 "description": "draw_storm, draw_reservoir: the area the reader draws, or the one "
-                                                "on the map"},
+                                 "description": "draw_storm, draw_reservoir, change_landuse: the area the "
+                                                "reader draws, or the one on the map"},
                         "polygon": {"type": "array", "items": {"type": "array", "items": num, "minItems": 2,
                                                                "maxItems": 2},
-                                    "description": "draw_storm, draw_reservoir: a ring of [lon, lat] the reader gave"},
+                                    "description": "draw_storm, draw_reservoir, change_landuse: a ring of "
+                                                   "[lon, lat] the reader gave"},
                         "crest_m": {"type": "number", "description": "draw_reservoir: the spillway's crest, m above "
                                                                      "the lowest ground, only when the reader gave it"},
                         "top_m": {"type": "number", "description": "draw_reservoir: the top of the dam, m above the "
@@ -682,6 +716,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
         return _validate_replay(action, out, place, t)
     if kind == "drop_well":
         return _validate_well(action, out, place)
+    if kind == "change_landuse":
+        return _validate_landuse(action, out)
     if kind == "draw_storm":
         return _validate_storm(action, out, place)
     if kind == "draw_reservoir":
@@ -1021,6 +1057,52 @@ def _validate_well(action: dict[str, Any], out: dict[str, Any], place: str | Non
     return out, None
 
 
+def _validate_landuse(action: dict[str, Any], out: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """Change land use (#661): the area (``area: "drawn"``: the reader draws it on the map, or the one on the map;
+    or ``polygon``, a ring of [lon, lat]), what
+    it becomes (``use``), and when the reader gave them the design storm (``rain_mm``), the soil group and, for use
+    ``impervious``, the percent impervious. The map computes the change (aquascope.sketch.landuse)."""
+    uses = _landuse_uses()
+    use = action.get("use")
+    if use not in uses:
+        return None, f"change_landuse's use must be one of {', '.join(uses)}"
+    out["use"] = use
+    poly = action.get("polygon")
+    if isinstance(poly, (list, tuple)):
+        if not 3 <= len(poly) <= LANDUSE_LIMITS["points"]:
+            return None, f"change_landuse's polygon needs 3 to {LANDUSE_LIMITS['points']} points"
+        pts = []
+        for p in poly:
+            ll = _latlon(p[1], p[0]) if isinstance(p, (list, tuple)) and len(p) == 2 else None
+            if not ll:
+                return None, "change_landuse's polygon is a list of [lon, lat] points"
+            pts.append([ll[1], ll[0]])
+        out["polygon"] = pts
+    elif poly is None and action.get("area") in (None, "drawn"):
+        out["area"] = "drawn"
+    else:
+        return None, "change_landuse needs area: drawn, or a polygon of [lon, lat]"
+    for key in ("rain_mm", "impervious_pct"):
+        v = action.get(key)
+        if v is None:
+            continue
+        lo, hi = LANDUSE_LIMITS[key]
+        if not _finite(v) or not lo <= float(v) <= hi:
+            return None, f"change_landuse's {key} must be a number from {lo:g} to {hi:g}"
+        out[key] = round(float(v), 2)
+    if use == "impervious" and "impervious_pct" not in out:
+        return None, "change_landuse's use impervious needs impervious_pct"
+    if action.get("soil_group") is not None:
+        g = str(action["soil_group"]).upper()
+        if g not in ("A", "B", "C", "D"):
+            return None, "change_landuse's soil_group is A, B, C or D"
+        out["soil_group"] = g
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
 def validate_actions(actions: Any, today: str | date | None = None) -> dict[str, Any]:
     """Check a list of actions: ``{"actions": [the ones that passed], "errors": [why the others did not]}``."""
     if isinstance(actions, dict):
@@ -1129,6 +1211,15 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             top = f", down to {float(a['invert']):g} m" if a.get("invert") is not None else ""
         return f"Draw {what} {where}{top}, and flood again"
+    if kind == "change_landuse":
+        from aquascope.sketch.landuse import TR55
+
+        what = (TR55[a["use"]]["label"].split(" (")[0].lower() if a["use"] in TR55
+                else f"{float(a.get('impervious_pct') or 0):g}% impervious")
+        where = "the area drawn" if a.get("area") == "drawn" else f"an area of {len(a.get('polygon') or [])} points"
+        rain = f", {float(a['rain_mm']):g} mm of rain" if a.get("rain_mm") is not None else ""
+        soil = f", soil group {a['soil_group']}" if a.get("soil_group") else ""
+        return f"Change {where} to {what}{rain}{soil}"
     if kind == "drop_well":
         where = a.get("label") or a.get("place") or ("the middle of the map" if a.get("at") == "center" else
                                                      f"{a.get('lat'):.3f}, {a.get('lon'):.3f}")
@@ -1680,6 +1771,51 @@ def _well_phrase(c: _Clause) -> None:
     c.add("drop_well", action)
 
 
+_LU_RAIN = r"(?:with|for|under|in)\s+(?:a\s+)?(?P<rain>\d+(?:\.\d+)?)\s*mm(?:\s+(?:of\s+)?(?:rain|storm|rainfall))?"
+_LU_AREA = r"(?:this|the|that)\s+(?:area|field|plot|site|land|polygon|place)|here|it"
+
+
+def _landuse_use(words: str) -> str | None:
+    for key, pat in LANDUSE_WORDS.items():
+        if re.fullmatch(r"(?:" + pat + r")", words.strip()):
+            return key
+    return None
+
+
+def _landuse_phrase(c: _Clause) -> None:
+    """Change land use (#661): "change this area to houses", "turn this field into a car park", "what if this area is
+    built over", "build houses here", "pave this area", "plant woods here", each with an optional "with 80 mm of
+    rain". The area is drawn on the map."""
+    text = c.text
+    rain = re.search(_LU_RAIN, text)
+    if rain:
+        text = (text[:rain.start()] + text[rain.end():]).strip()
+    text = re.sub(r"\s+", " ", text).strip(" ,")
+    use = None
+    for pat in (r"^(?:change|turn|convert|make)\s+(?:" + _LU_AREA + r")\s+(?:to|into)\s+(?P<w>.+)$",
+                r"^(?:change\s+)?(?:the\s+)?land\s*use\s+(?:here\s+)?(?:to|into)\s+(?P<w>.+)$",
+                r"^what if\s+(?:" + _LU_AREA + r")\s+(?:is|was|were|became|becomes|gets|got)\s+(?P<w>.+)$",
+                r"^(?:build|put|plant|develop)\s+(?P<w>.+?)\s+(?:here|on\s+(?:" + _LU_AREA + r")|in\s+(?:" + _LU_AREA
+                + r"))$",
+                r"^(?P<w>pave|build on|build over|develop|urbani[sz]e)\s+(?:" + _LU_AREA + r")$"):
+        m = re.search(pat, text)
+        if not m:
+            continue
+        w = re.sub(r"^(?:a|an|the|some)\s+", "", m.group("w").strip())
+        w = {"pave": "paved", "build on": "built on", "build over": "built over", "develop": "developed",
+             "urbanise": "urbanised", "urbanize": "urbanized"}.get(w, w)
+        use = _landuse_use(w) or _landuse_use(m.group("w").strip())
+        if use:
+            break
+    if not use:
+        return
+    action: dict[str, Any] = {"type": "change_landuse", "area": "drawn", "use": use}
+    if rain:
+        action["rain_mm"] = float(rain.group("rain"))
+    c.text = ""
+    c.add("change_landuse", action)
+
+
 def _river_phrase(c: _Clause) -> None:
     patterns = [
         (r"^(?:show(?: me)?\s+)?(?:the\s+)?(?:way|path|route)\s+(?:of|from)\s+(?:the\s+)?(?P<p>.+?)"
@@ -1868,7 +2004,7 @@ def _place_phrase(c: _Clause) -> None:
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
                                       "highlight_river", "route", "flood_reach", "draw_levee", "draw_breach",
-                                      "drop_well", "replay",
+                                      "drop_well", "change_landuse", "replay",
                                       "draw_storm", "draw_reservoir",
                                       "add_pin", "paint"))}
 
@@ -1879,7 +2015,7 @@ def _parse_clause(raw: str, today: date) -> _Clause:
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
     for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _replay_phrase, _sketch_phrase,
-                 _well_phrase, _storm_phrase, _reservoir_phrase,
+                 _well_phrase, _landuse_phrase, _storm_phrase, _reservoir_phrase,
                  _area_phrase, _flood_phrase, _route_phrase, _river_phrase):
         step(c)
         if c.actions:
@@ -2363,6 +2499,10 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         '- drop_well: drop a pumping well and draw its drawdown cone (Theis). "place" (or "lat" and "lon", or "at": '
         '"center" for the middle of the map); "rate_m3_day" only when the reader gave a rate (L/s times 86.4); "days", '
         '"transmissivity" (m2/day) and "storativity" only when given. The map computes the cone and every number.',
+        '- change_landuse: a drawn area becomes a new land use; the map shows the runoff and peak flow before and '
+        'after (SCS curve number, TR-55). "area": "drawn" (the reader draws it), or "polygon" when the reader '
+        'gave one; "use": one of the listed uses ("impervious" with "impervious_pct"); "rain_mm" and "soil_group" '
+        'only when the reader gave them.',
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "

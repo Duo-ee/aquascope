@@ -1025,6 +1025,25 @@ def drop_well(wells: list[dict[str, Any]] | None = None, lon: float | None = Non
     return res
 
 
+def change_landuse(polygon: Any, use: str, rain_mm: float = 100.0, distribution: str = "II",
+                   soil_group: str | None = None, impervious_pct: float | None = None) -> dict[str, Any]:
+    """The sketchpad's land use (#661): a polygon (a ring of [lon, lat], or GeoJSON) becomes use (residential_1_8,
+    residential_1_4, residential_1_2, residential_1_acre, commercial, industrial, paved, newly_graded,
+    open_space_good, row_crops, pasture_good, meadow, woods_good, or impervious with impervious_pct). The SCS curve
+    number method of USDA TR-55: the cover now from ESA WorldCover 2021, the hydrologic soil group from HYSOGs250m
+    (or soil_group, A to D), the curve number, the runoff from rain_mm of 24-hour rain (100 by default; give your
+    design storm) and the area's peak by TR-55's graphical method (distribution I, IA, II or III; Tc from NEH 630's
+    lag equation on the terrain's slope), before and after, the reach it drains to and the added peak for Route it.
+    Checked against TR-55's examples 2-1 to 2-4 and 4-1. Numbers from code; every source and licence in the answer."""
+    from aquascope.sketch import landuse as lu
+
+    try:
+        return lu.landuse_change(polygon, use, rain_mm=rain_mm, distribution=distribution, soil_group=soil_group,
+                                 impervious_pct=impervious_pct)
+    except (ValueError, RuntimeError, OSError) as exc:
+        return {"error": str(exc)}
+
+
 def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None) -> dict[str, Any]:
     """Route it (#656): a storm over polygon (a ring of [lon, lat]) of rain_mm over duration_h hours, a plain
@@ -1870,6 +1889,7 @@ def build_server():
     server.tool()(replay_candidates)
     server.tool()(replay_event)
     server.tool()(drop_well)
+    server.tool()(change_landuse)
     server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)

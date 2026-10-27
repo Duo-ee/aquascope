@@ -1984,6 +1984,32 @@ json.dumps(_out)
   post("result", { id, result: JSON.parse(out) });
 }
 
+// ── Change land use (#661): aquascope.sketch.landuse, the same function as `aquascope landuse` and the MCP tool
+// change_landuse. Type "landuse" (the main worker: the soil group's COG and the network need numpy, the outlet the
+// stream tiles): op "change" reads the cover, the soil and the slope under the polygon and computes TR-55 before
+// and after, with the reach it drains to; op "check" recomputes TR-55's worked examples.
+async function landuseOp({ id, op, args }) {
+  pyodide.globals.set("_lu_args", JSON.stringify({ op: String(op || "change"), args: args || {} }));
+  const code = `
+import json
+from aquascope.sketch import landuse as _lu
+_a = json.loads(_lu_args)
+_k = dict(_a["args"])
+try:
+    if _a["op"] == "change":
+        _out = _lu.landuse_change(_k.pop("polygon"), _k.pop("use"), **_k)
+    elif _a["op"] == "check":
+        _out = _lu.check()
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+json.dumps(_out, default=str)
+`;
+  const out = await pyodide.runPythonAsync(code);
+  post("result", { id, result: JSON.parse(out) });
+}
+
 self.onmessage = async (e) => {
   const m = e.data;
   try {
@@ -2027,6 +2053,7 @@ self.onmessage = async (e) => {
     if (m.type === "floodsim") return await floodsimOp(m);
     if (m.type === "replay") return await replayOp(m);
     if (m.type === "well") return await wellOp(m);
+    if (m.type === "landuse") return await landuseOp(m);
     if (m.type === "groundwater") return await groundwater(m);
     if (m.type === "gw_layers") return await gwLayers(m);
   } catch (err) {

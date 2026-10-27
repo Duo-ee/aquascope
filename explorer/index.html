@@ -37,6 +37,7 @@
       </section>
   <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
   <link rel="stylesheet" href="./well.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./landuse.css?v=__BUILD__" />
 </head>
 <body class="panel-collapsed">
   <a class="skip" href="#panel">Skip to the results panel</a>
@@ -460,6 +461,48 @@
           <p id="wl-model" class="wl-src">Defaults: 1000 m³/day, T 500 m²/day, S 1e-4, 30 days.</p>
           <p id="wl-src" class="wl-src"></p></details>
         <div class="wi-foot"><button id="wl-clear" type="button" class="link-btn">Take the wells off</button></div>
+      </section>
+      <!-- Change land use (#661): a drawn area's runoff and peak before and after (TR-55); src/landuse-map.js -->
+      <section id="landuse" class="whatif route landuse" aria-labelledby="lu-title" hidden>
+        <header class="wi-head">
+          <div>
+            <p class="wi-kicker">Change land use</p>
+            <h2 id="lu-title" class="wi-title">Draw the area</h2>
+            <p class="wi-sub">SCS curve number (TR-55): runoff and peak, now and after</p>
+          </div>
+          <button type="button" class="wi-close lu-close" aria-label="Close Change land use" title="Close (Esc)">×</button>
+        </header>
+        <form id="lu-form" class="wi-form lu-form">
+          <label class="lu-field"><span>Becomes</span><select id="lu-use" aria-label="What the area becomes"></select></label>
+          <label id="lu-imp-row" class="lu-field" hidden><span>Impervious</span>
+            <input id="lu-imp" type="number" min="0" max="100" step="any" inputmode="decimal" aria-label="Impervious share, percent" /> %</label>
+          <label class="lu-field"><span>Storm</span>
+            <input id="lu-rain" type="number" min="1" max="2000" step="any" inputmode="decimal" aria-label="24-hour design storm, mm" /> mm in 24 h,
+            <select id="lu-dist" aria-label="SCS rainfall distribution"></select></label>
+          <p class="lu-plain">100 mm is a placeholder: put your place's 24-hour design storm.</p>
+          <label class="lu-field"><span>Soil</span><select id="lu-soil" aria-label="Hydrologic soil group">
+            <option value="">read from HYSOGs250m</option><option value="A">A (sand, low runoff)</option>
+            <option value="B">B</option><option value="C">C</option><option value="D">D (clay, high runoff)</option></select></label>
+          <div class="wi-run-row">
+            <button id="lu-draw" type="button" class="btn small ghost">Draw the area</button>
+            <button id="lu-run" type="submit" class="btn small primary">Compute</button>
+          </div>
+        </form>
+        <p id="lu-status" class="wi-status" role="status" hidden></p>
+        <div id="lu-result" class="wi-result" hidden>
+          <p id="lu-head" class="rt-head"></p>
+          <table id="lu-table" class="lu-table"></table>
+          <div id="lu-cover"></div>
+          <p id="lu-soil-out" class="lu-plain"></p>
+          <p id="lu-notes" class="lu-notes" hidden></p>
+          <button id="lu-route" type="button" class="btn small" hidden>Route the extra peak downstream</button>
+          <details class="wl-how"><summary>Method, sources and licences</summary>
+            <p id="lu-model" class="wl-src"></p><p id="lu-src" class="wl-src"></p></details>
+          <div class="wi-foot">
+            <button id="lu-edit" type="button" class="link-btn wi-edit">Change the use or the storm</button>
+            <button id="lu-clear" type="button" class="link-btn">Take it off</button>
+          </div>
+        </div>
       </section>
       <!-- Draw a storm (#670): rain on a drawn area, routed down the rivers on the time bar; src/storm-map.js -->
       <section id="storm" class="whatif route storm" aria-labelledby="st-title" hidden>

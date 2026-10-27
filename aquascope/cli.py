@@ -1498,6 +1498,69 @@ def _route_reservoir(args: argparse.Namespace) -> None:
     print(f"  {res['attribution']} {r['terrain_source']}.")
 
 
+def cmd_landuse(args: argparse.Namespace) -> None:
+    """`aquascope landuse`: a land-use change drawn as a polygon, its runoff and peak before and after (TR-55, #661)."""
+    from aquascope.sketch import landuse as lu
+
+    for name in ("aquascope", "httpx"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    if args.check:
+        res = lu.check()
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+        for r in res["rows"]:
+            print(f"  {'ok ' if r['ok'] else 'NO '} {r['what']}: printed {r['printed']}; computed {r['computed']}")
+        for src in res["sources"]:
+            print(f"  {src}")
+        if not res["ok"]:
+            sys.exit(1)
+        return
+    if args.uses:
+        for key in lu.USES:
+            label = lu.TR55[key]["label"] if key in lu.TR55 else "Open space with --impervious percent (figure 2-3)"
+            print(f"  {key:<20}{label}")
+        return
+    if not args.polygon or not args.use:
+        print("  Give --polygon (a ring of [lon, lat], as JSON or a GeoJSON file) and --use (see --uses), or --check.")
+        sys.exit(1)
+    raw = args.polygon
+    path = Path(raw)
+    text = path.read_text() if not raw.lstrip().startswith(("{", "[")) and path.exists() else raw
+    try:
+        poly = json.loads(text)
+        if isinstance(poly, dict) and poly.get("type") == "FeatureCollection":
+            poly = poly["features"][0]
+        res = lu.landuse_change(poly, args.use, rain_mm=args.rain, distribution=args.type, soil_group=args.soil,
+                                impervious_pct=args.impervious, slope_pct=args.slope, tc_hours=args.tc,
+                                outlet=not args.no_outlet)
+    except (json.JSONDecodeError, ValueError, RuntimeError, OSError) as exc:
+        print(f"  Could not compute the change: {exc}")
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        return
+    print(f"  {res['summary']}")
+    b, a = res["before"], res["after"]
+    print(f"\n  {'':<10}{'CN':>6}{'runoff mm':>11}{'Tc h':>7}{'Ia/P':>7}{'qu csm/in':>11}{'Fp':>6}{'peak m3/s':>11}")
+    for name, r in (("before", b), ("after", a)):
+        print(f"  {name:<10}{r['cn']:>6.1f}{r['q_mm']:>11.1f}{r['tc_h']:>7.2f}{r['ia_p']:>7.3f}{r['qu_csm_in']:>11.0f}"
+              f"{r['fp']:>6.2f}{r['peak_cms']:>11.2f}")
+    soils = ", ".join(f"{g} {f:.0%}" for g, f in res["soils"].items())
+    print(f"\n  Soil groups: {soils}. Tc: {res['tc_from']}. Rain: {res['rain_mm']:g} mm, type {res['distribution']}.")
+    for c in res["cover"]:
+        cn = f"CN {c['cn']:.0f}" if c["cn"] is not None else c["tr55"]
+        print(f"    {c['label']:<28}{c['share']:>7.1%}  {cn}")
+    if res.get("reach"):
+        r = res["reach"]
+        print(f"  Drains to GEOGLOWS reach {r['river_id']} (order {r['strahler_order']}, {r['distance_m']:,.0f} m away).")
+    if res.get("route"):
+        print(f"  For Route it: {res['route']['peak_cms']:g} m3/s added at the peak, over {res['route']['duration_h']:g} h.")
+    for n in res["notes"]:
+        print(f"  {n}")
+    print(f"  {res['check']}")
+
+
 def cmd_whatif(args: argparse.Namespace) -> None:
     """`aquascope whatif`: a scenario for a reach's basin, carried down the river (#565)."""
     from aquascope import whatif_map as wm
@@ -5292,6 +5355,22 @@ def main() -> None:
     p_well.add_argument("--check", action="store_true",
                         help="Recompute the textbook checks (Fetter's worked example, USGS PP 708's W(u) table)")
     p_well.add_argument("--json", action="store_true")
+    # ── the sketchpad: change land use (#661) ───────────────────────
+    p_lu = sub.add_parser("landuse", help="A land-use change drawn as a polygon: the curve number, runoff and peak "
+                          "before and after (SCS curve number, TR-55): the Explorer's Change land use")
+    p_lu.add_argument("--polygon", default=None, help='A ring of [lon, lat] as JSON, or a GeoJSON file')
+    p_lu.add_argument("--use", default=None, help="What the area becomes: a key of --uses")
+    p_lu.add_argument("--impervious", type=float, default=None, help="With --use impervious: the percent impervious")
+    p_lu.add_argument("--rain", type=float, default=100.0, help="The 24-hour design storm, mm (100; give your own)")
+    p_lu.add_argument("--type", choices=["I", "IA", "II", "III"], default="II", help="SCS rainfall distribution (II)")
+    p_lu.add_argument("--soil", choices=["A", "B", "C", "D"], default=None,
+                      help="The hydrologic soil group (by default read from HYSOGs250m)")
+    p_lu.add_argument("--slope", type=float, default=None, help="Average land slope, %% (by default from the terrain)")
+    p_lu.add_argument("--tc", type=float, default=None, help="Time of concentration, h (by default NEH 630's lag)")
+    p_lu.add_argument("--no-outlet", action="store_true", help="Skip finding the river reach below the area")
+    p_lu.add_argument("--uses", action="store_true", help="List the uses")
+    p_lu.add_argument("--check", action="store_true", help="Recompute TR-55's worked examples and NEH 630's Tc example")
+    p_lu.add_argument("--json", action="store_true")
     p_rr = route_sub.add_parser("reservoir", help="A flood through a reservoir drawn as a polygon on a river "
                                 "(level-pool routing), and on down the river; --check repeats NEH 630 Example 17-2")
     p_rr.add_argument("--polygon", default=None, help='The reservoir, a ring of [lon, lat] as JSON')
@@ -6244,6 +6323,7 @@ def main() -> None:
         "whatif": cmd_whatif,
         "route": cmd_route,
         "well": cmd_well,
+        "landuse": cmd_landuse,
         "flood": cmd_flood,
         "replay": cmd_replay,
         "swmm": cmd_swmm,

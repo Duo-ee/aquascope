@@ -548,6 +548,14 @@ table of W(u).
 
 ![Drop a well: two cones near Lyon](img/sketchpad/well-two-desktop.jpg)
 
+**Change land use** (#661) draws an area and turns it into a new use (housing, a car park, woods, ...): the runoff and
+the area's peak flow now and after for your design storm (SCS curve number, TR-55, with the cover from ESA WorldCover
+and the soil group from HYSOGs250m), the reach it drains to lit on the map, and the extra peak sent down the river
+with Route it. Ask the map reads "turn this field into a car park with 80 mm of rain". Checked against TR-55's worked
+examples.
+
+![Change land use: a field on the edge of Lyon as town houses](img/sketchpad/landuse-result-desktop.jpg)
+
 ## Paint this view
 
 The brush in the map tools paints one question at every gauge in view that the
