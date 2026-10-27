@@ -121,6 +121,8 @@ const TOOLS = [
       + "wave down the river, #656). "
       + "paint {question flood_trend|low_flow_trend|baseflow_index, place | bbox (none: the view), min_years}: "
       + "every gauge in the box answered by aquascope.paint and painted, with field significance. "
+      + "replay {place | lat, lon | at: here, month YYYY-MM, pick 1-5}: a past flood told as a story on the map "
+      + "(Floods past's flood there that month, assembled by aquascope.replay, #659). "
       + "Each is checked before it runs; place names are looked up in the gazetteer.",
     inputSchema: {
       type: "object",

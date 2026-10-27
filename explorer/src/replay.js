@@ -13,8 +13,8 @@ import { $, actions, escapeHtml, setTime, state } from "./core.js?v=__BUILD__";
 import { captureMap, map, whenSettled } from "./map.js?v=__BUILD__";
 import { call, onReplayProgress } from "./worker-client.js?v=__BUILD__";
 import { logAction, registerSlotWriter, setMapLayer, slotValue } from "./map-actions.js?v=__BUILD__";
-import { showRouted } from "./route-map.js?v=__BUILD__";
-import { exposureOfShown, floodIt } from "./floodsim-map.js?v=__BUILD__";
+import { clearRouted, showRouted } from "./route-map.js?v=__BUILD__";
+import { drawExposureOf, exposureOfShown, floodIt } from "./floodsim-map.js?v=__BUILD__";
 import { announce } from "./a11y.js?v=__BUILD__";
 import { gifSize } from "./timeline.js?v=__BUILD__";
 import {
@@ -112,6 +112,12 @@ export async function startReplay(ev, { by = "rules", label = "", command = "" }
   const lines = [];
   const say = (text) => { lines.push(text); renderBuild(null, lines); };
   renderBuild(null, ["Starting the engine (once), then finding the river…"]);
+  // The camera goes to the flood while the data is read, so the wait is spent looking at the place.
+  const lat = Number(ev.lat ?? (ev.event && ev.event.lat)), lon = Number(ev.lon ?? (ev.event && ev.event.lon));
+  if (state.mapOk && map && Number.isFinite(lat) && Number.isFinite(lon)) {
+    const cam = { center: [lon, lat], zoom: narrow() ? 7.2 : 8, pitch: 0, bearing: 0 };
+    if (still()) map.jumpTo(cam); else map.flyTo({ ...cam, duration: 2500, essential: true });
+  }
   const off = onReplayProgress((text) => { if (my === run) say(text); });
   try {
     let record = await call("replay", { op: "record", args });
@@ -155,7 +161,7 @@ export async function startReplay(ev, { by = "rules", label = "", command = "" }
 const replayAction = (ev) => ({ ...(ev.river_id ? { river_id: ev.river_id } : {}), start: ev.start, end: ev.end });
 
 function renderBuild(record, lines) {
-  const rows = record ? pieceRows(record) : [];
+  const rows = pieceRows(record || { pieces: {} });
   const mark = { ok: "✓", missing: "–", pending: "…", waiting: "·" };
   showBody(`<ul class="rp-build">${rows.map((r) => `<li class="${r.state}"><i aria-hidden="true">${mark[r.state]}</i>` +
     `<span>${escapeHtml(r.label)}${r.text ? ` <small>${escapeHtml(r.text)}</small>` : ""}</span></li>`).join("")}</ul>` +
@@ -232,19 +238,27 @@ export async function goTo(i, { fly = true } = {}) {
   applyLayers(st);
   if (st.date) setTime({ date: st.date }, { source: "replay" });
   drawMarks(st);
-  const cam = cameraFor(st, { narrow: narrow() });
-  if (state.mapOk && map) {
-    if (!fly || still()) map.jumpTo(cam);
-    else map.flyTo({ ...cam, duration: 2600, essential: true, padding: { top: 60, bottom: narrow() ? 230 : 190, left: 40, right: 40 } });
-  }
+  if (st.kind !== "wave" && cur.wave) { try { clearRouted(); } catch { /* gone */ } cur.wave = false; }
+  frame(st, { fly });
   if (st.kind === "wave") showWave();
   if (st.kind === "flood" || st.kind === "exposure") {
     await ensureFlood(st);
     if (my !== run || !cur) return;
     setNote(cur.stops[cur.i]);
+    if (cur.stops[cur.i] === st) frame(st, { fly });   // Flood it framed its own run; the story's camera again
   }
   if (my !== run || !cur || cur.stops[cur.i] !== st) return;
   scheduleNext(st);
+}
+
+// The note card sits at the bottom: the camera keeps the subject above it.
+const camPadding = () => ({ top: 70, bottom: narrow() ? Math.round((globalThis.innerHeight || 800) * 0.36) : 200, left: 40, right: 40 });
+
+function frame(st, { fly = true } = {}) {
+  if (!state.mapOk || !map) return;
+  const cam = { ...cameraFor(st, { narrow: narrow() }), padding: camPadding() };
+  if (!fly || still()) map.jumpTo(cam);
+  else map.flyTo({ ...cam, duration: 2600, essential: true });
 }
 
 function setNote(st) {
@@ -278,16 +292,22 @@ function applyLayers(st) {
   for (const id of [...cur.layersOn]) {
     if (!want.has(id) && id === "precip") { try { setMapLayer(id, false); } catch { /* gone */ } cur.layersOn.delete(id); }
   }
-  showBasin((st.layers || []).includes("basin") ? st.basin : null);
+  showBasin((st.layers || []).includes("basin") ? st.basin : null, st.outline);
 }
 
-function showBasin(geom) {
+// The upstream basin the rain was averaged over: its cells faintly filled, its outline (the edges of one cell only).
+function showBasin(geom, outline = null) {
   if (!state.mapOk || !map) return;
-  const data = { type: "FeatureCollection", features: geom ? [{ type: "Feature", properties: {}, geometry: geom }] : [] };
+  const feats = [];
+  if (geom) feats.push({ type: "Feature", properties: { k: "fill" }, geometry: geom });
+  if (geom && outline) feats.push({ type: "Feature", properties: { k: "line" }, geometry: outline });
+  const data = { type: "FeatureCollection", features: feats };
   if (!map.getSource(BASIN)) {
     map.addSource(BASIN, { type: "geojson", data });
-    map.addLayer({ id: `${BASIN}-fill`, type: "fill", source: BASIN, paint: { "fill-color": "#1f6feb", "fill-opacity": 0.07 } });
-    map.addLayer({ id: `${BASIN}-line`, type: "line", source: BASIN, paint: { "line-color": "#1f6feb", "line-width": 1.6, "line-dasharray": [2, 1.5] } });
+    map.addLayer({ id: `${BASIN}-fill`, type: "fill", source: BASIN, filter: ["==", ["get", "k"], "fill"],
+      paint: { "fill-color": "#0b3d91", "fill-opacity": 0.12, "fill-antialias": false } });
+    map.addLayer({ id: `${BASIN}-line`, type: "line", source: BASIN, filter: ["==", ["get", "k"], "line"],
+      paint: { "line-color": "#0b3d91", "line-width": 2.2, "line-opacity": 0.9 } });
   } else map.getSource(BASIN).setData(data);
 }
 
@@ -306,9 +326,13 @@ function showWave() {
   const w = cur.record.pieces.wave;
   if (!w || !w.available || cur.wave) return;
   cur.wave = true;
-  const result = { ok: true, river_id: w.river_id, reaches: w.reaches, frames: w.frames, geometry: w.geometry, hours: w.hours,
+  // The hours on the map count from the peak passing the gauge, as the note does, not from the series' first day.
+  const t0 = (w.reaches && w.reaches[0] && w.reaches[0].peak_h) || 0;
+  const shift = (r) => ({ ...r, peak_h: r.peak_h === null || r.peak_h === undefined ? r.peak_h : Math.round((r.peak_h - t0) * 10) / 10 });
+  const result = { ok: true, river_id: w.river_id, reaches: (w.reaches || []).map(shift), frames: w.frames, geometry: w.geometry, hours: w.hours,
     inflow: w.inflow || { peak_cms: w.inflow_peak_cms, source: w.inflow_source, shape: "series", duration_h: w.hours },
-    places: w.route_places || [], furthest: w.furthest, check: { summary: w.check } };
+    places: (w.route_places || []).map(shift).filter((pl) => pl.peak_h === null || pl.peak_h >= 0), furthest: w.furthest,
+    check: { summary: w.check } };
   try { showRouted(result, { river_id: w.river_id, lat: cur.story.event.lat, lon: cur.story.event.lon }, { label: "Replay: the wave" }); }
   catch (err) { console.warn("replay wave:", err); }
 }
@@ -337,6 +361,7 @@ async function ensureExposure() {
   cur.expo = { pending: true };
   try { cur.expo = (await exposureOfShown()) || { error: "no run on the map" }; }
   catch (err) { if (cur) cur.expo = { error: err.message }; }
+  if (cur && cur.expo && cur.expo.newly_flooded) { try { drawExposureOf(cur.expo); } catch { /* the count stands */ } }
   if (cur && cur.stops[cur.i] && cur.stops[cur.i].kind === "exposure") setNote(cur.stops[cur.i]);
 }
 

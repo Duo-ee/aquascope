@@ -73,6 +73,8 @@ WAVE_DAYS = (6, 14)
 GAUGE_KM = 30.0
 STEM_REACHES = 80
 MAX_GAUGES = 3
+#: The wave's note and camera keep to the places this far down the river (km).
+WAVE_NOTE_KM = 150.0
 #: How far from a news event's centre its river is looked for.
 EVENT_RADIUS_M = 12000.0
 #: The upstream basin goes to ClimateSERV as cells of this size (degrees), coarser when it would be too many.
@@ -392,7 +394,8 @@ def gauges(river_id: int, a: date, b: date, *, lat: float | None = None, lon: fl
         sim = _retro(g["river_id"], a, b)
         po, ps = _peak(obs), _peak(sim)
         row: dict[str, Any] = {
-            "source": r["source"], "station_id": str(r["station_id"]), "name": r.get("name") or str(r["station_id"]),
+            "source": r["source"], "station_id": str(r["station_id"]),
+            "name": _display_name(r.get("name") or str(r["station_id"])),
             "river": r.get("river") or None,
             "lat": float(r["latitude"]), "lon": float(r["longitude"]), "river_id": g["river_id"],
             "reaches_from_event": g["steps"], "observed": [[d, round(v, 3)] for d, v in obs],
@@ -421,6 +424,18 @@ def gauges(river_id: int, a: date, b: date, *, lat: float | None = None, lon: fl
             "method": ("Each gauge is snapped to the GEOGLOWS reach it stands on; the peak error is the simulated "
                        "daily peak less the observed, over the observed; the timing is the day of the simulated "
                        "peak less the day of the observed, both inside the window.")}
+
+
+def _display_name(name: str) -> str:
+    """An agency's name as a reader writes it: USGS's are in capitals ("FRENCH BROAD RIVER AT ASHEVILLE, NC")."""
+    if not name or name != name.upper() or not any(c.isalpha() for c in name):
+        return name
+    words = []
+    for w in name.split(" "):
+        bare = w.strip(",.()")
+        words.append(w if len(bare) == 2 and bare.isalpha() and w.endswith(bare) and words and
+                     words[-1].endswith(",") else w.capitalize())
+    return " ".join(words).replace(" At ", " at ").replace(" Nr ", " near ").replace(" Near ", " near ")
 
 
 def _licence_of(source: str) -> str:
@@ -470,7 +485,16 @@ def basin_cells(river_id: int, *, lat: float | None = None, lon: float | None = 
                [round(x0 * deg, 4), round(y * deg, 4)]]] for y, x0, x1 in runs]
     bbox = [round(float(lo.min()), 4), round(float(la.min()), 4), round(float(lo.max()), 4),
             round(float(la.max()), 4)]
+    # The basin's outline for the map: the cell edges that belong to one cell only.
+    have = set(cells)
+    edges = []
+    for y, x in cells:
+        for dy, dx, seg in ((-1, 0, ((x, y), (x + 1, y))), (1, 0, ((x, y + 1), (x + 1, y + 1))),
+                            (0, -1, ((x, y), (x, y + 1))), (0, 1, ((x + 1, y), (x + 1, y + 1)))):
+            if (y + dy, x + dx) not in have:
+                edges.append([[round(a * deg, 4), round(b * deg, 4)] for a, b in seg])
     return {"geometry": {"type": "MultiPolygon", "coordinates": polys}, "cell_deg": deg, "cells": len(cells),
+            "outline": {"type": "MultiLineString", "coordinates": edges},
             "bbox": bbox, "area_km2": round(area, 1), "n_reaches": len(ups)}
 
 
@@ -544,7 +568,7 @@ def rain(river_id: int, a: date, b: date, *, lat: float | None = None, lon: floa
         "method": (f"The mean of the IMERG cells over the upstream basin: the {basin['cells']} cells of "
                    f"{basin['cell_deg']:g}° holding the centre of a GEOGLOWS unit catchment upstream of the reach "
                    f"({basin['n_reaches']:,} reaches, {basin['area_km2']:,.0f} km² summed from the routing tables)."),
-        "basin": {k: basin[k] for k in ("bbox", "area_km2", "cell_deg", "cells", "geometry")},
+        "basin": {k: basin[k] for k in ("bbox", "area_km2", "cell_deg", "cells", "geometry", "outline")},
         "window": [a.isoformat(), b.isoformat()],
     }
     try:
@@ -1009,9 +1033,12 @@ def _event_name(rec: dict[str, Any]) -> str:
 
 
 def _zoom_for(bbox: list[float]) -> float:
+    """The zoom that fits a box in about 800 by 480 pixels of a 512-pixel-tile map (MapLibre), the room the note
+    leaves; latitude is stretched by the Mercator factor."""
     w, s, e, n = bbox
-    span = max(e - w, (n - s) * 1.4, 0.02)
-    return round(max(3.0, min(13.0, math.log2(900.0 / span))), 2)
+    stretch = 1.0 / max(0.2, math.cos(math.radians((s + n) / 2)))
+    span = max(e - w, (n - s) * stretch * 800.0 / 480.0, 0.02)
+    return round(max(3.0, min(13.0, math.log2(360.0 * 800.0 / 512.0 / span))), 2)
 
 
 def _centre(bbox: list[float]) -> list[float]:
@@ -1066,6 +1093,7 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
              f"IMERG: {rain_p['total_mm']:,.0f} mm fell on the {rain_p['basin']['area_km2']:,.0f} km² upstream from "
              f"{_day(rain_p['window'][0])} to {_day(rain_p['window'][1])}; the wettest day, {_day(pk['date'])}, "
              f"brought {pk['mm']:,.0f} mm.", basin=rain_p["basin"]["geometry"],
+             outline=rain_p["basin"].get("outline"),
              series={"kind": "rain", "unit": "mm", "values": rain_p["daily_mm"]})
     elif rain_p.get("pending"):
         stop("rain", "rain", "The rain", {**wide, "pitch": 30, "bearing": -10}, peak.get("date"), ["precip", "basin"],
@@ -1118,7 +1146,8 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
         stop("forecast", "forecast", "The forecast", near, peak.get("date"), ["rivers"],
              f"Forecast not available: {fc_p.get('note')}")
     if wave_p.get("available"):
-        pts = [x for x in wave_p["places"] if x.get("lag_h") is not None and x["lag_h"] > 0]
+        pts = [x for x in wave_p["places"] if x.get("lag_h") is not None and x["lag_h"] > 0
+               and float(x.get("along_km") or 0.0) <= WAVE_NOTE_KM]
         far = pts[-1] if pts else None
         note = f"Routed from {f['name']} ({wave_p['inflow_source']}, peak {_q(wave_p['inflow_peak_cms'])})"
         if far:
@@ -1130,8 +1159,8 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
             note += ". The water from here alone; the rivers that join add their own."
         else:
             note += ". No gauge or town on the stretch it reached."
-        geo = (wave_p.get("geometry") or {}).get("coordinates") or []
-        box = _bbox_of(geo) if geo else None
+        box = _bbox_of([[float(f["lon"]), float(f["lat"])]] + [[float(x["lon"]), float(x["lat"])] for x in pts
+                                                              if x.get("lon") is not None])
         cam = ({"center": _centre(box), "zoom": _zoom_for(box) - 0.2, "pitch": 35, "bearing": 0} if box else near)
         stop("wave", "wave", "The wave downstream", cam, peak.get("date"), ["route"], note)
     else:
@@ -1139,7 +1168,7 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
              f"Route it not available: {wave_p.get('note')}")
     fl_cam = {"center": here, "zoom": 12.4, "pitch": 55, "bearing": 18}
     tmpl_flood = ("At {flow} ({flow_source}), Flood it puts {wet_km2} km² under water, {max_depth_m} m at the "
-                  "deepest: " + FLOOD_LABEL + ".")
+                  "deepest. A screening flood: no bathymetry, terrain errors of metres; not a design flood.")
     tmpl_expo = "Under that water: {buildings} buildings, {roads_km} km of road and about {people} people."
     fr = flood_result or (flood_p if flood_p.get("available") else None)
     if fr or flood_p.get("pending"):

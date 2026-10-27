@@ -991,6 +991,9 @@ export async function exposureOfShown() {
   return { ...res, bbox: [w, s, e, nn] };
 }
 
+/** The buildings under the run on the map, red, from exposureOfShown's answer (a replay's exposure stop, #659). */
+export function drawExposureOf(res) { if (res && res.newly_flooded) drawExpo(res, null); }
+
 /** Ask the map's draw_levee and draw_breach (aquascope.map_commands): the model picks the line and the crest, this
  * draws it, computes nothing itself, and floods again. */
 export async function sketchAction(a, { by = "rules", command = "", label = "" } = {}) {

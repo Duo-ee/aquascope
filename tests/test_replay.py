@@ -219,7 +219,7 @@ def test_the_flood_stops_carry_a_template_the_page_fills_or_the_numbers_given():
         "available": True, "buildings": 1234, "roads_km": 45.67, "people": 2050.4}})
     notes = {s["id"]: s["note"] for s in done["stops"]}
     assert notes["flood"].startswith("At 433 m³/s (the daily mean observed at Saxons Lode), Flood it puts 41.2 km² "
-                                     "under water, 6.0 m at the deepest: a screening flood")
+                                     "under water, 6.0 m at the deepest. A screening flood")
     assert notes["exposure"] == "Under that water: 1,234 buildings, 45.7 km of road and about 2,050 people."
 
 

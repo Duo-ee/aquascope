@@ -334,6 +334,9 @@ export function showRouted(result, t, { frame = false, label = "", by = "rules" 
   return value;
 }
 
+/** Take the wave off the map (a replay moving on from its wave stop). */
+export function clearRouted() { if (shown) paint(null); }
+
 // The path is framed now, so the basemap's labels along it are loaded: the towns not placed yet are placed on it.
 async function addTowns(value) {
   await new Promise((r) => setTimeout(r, 1800));
