@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from aquascope import explore
@@ -239,3 +241,92 @@ def test_a_source_aquascope_cannot_fetch_is_said_plainly(archive):
     note = next(n for n in res["notes"] if "Kalkheuwel" in n)
     assert "cannot fetch south_africa_dws records yet" in note and "attached as a table" in note
     assert sum("Kalkheuwel" in n for n in res["notes"]) == 1
+
+
+# ── the quality half (#375) ─────────────────────────────────────────────────
+
+def _daily_record(start="1960-01-01", end="2019-12-31", level=100.0):
+    index = pd.date_range(start, end, freq="D")
+    return pd.Series(level + 10.0 * np.sin(2 * np.pi * index.dayofyear / 365.25), index=index)
+
+
+def test_record_quality_half_sees_completeness_and_the_long_gap():
+    whole = _daily_record()
+    gappy = whole.drop(whole.loc["1971-01-01":"1984-12-31"].index)
+    complete = explore.record_quality_half(whole, "discharge")
+    hole = explore.record_quality_half(gappy, "discharge")
+    assert complete["completeness"] == 1.0
+    assert hole["completeness"] < complete["completeness"]
+    assert hole["completeness"] < 0.8
+    assert complete["longest_gap_days"] == 0
+    assert hole["longest_gap_days"] > complete["longest_gap_days"]
+    assert hole["longest_gap_days"] > 14 * 365
+    assert json.loads(json.dumps(hole)) == hole
+
+
+def test_record_quality_half_reports_the_pettitt_shift_and_flags():
+    index = pd.date_range("1960-01-01", "2019-12-31", freq="D")
+    values = np.where(index.year < 1991, 100.0, 50.0) + 5.0 * np.sin(2 * np.pi * index.dayofyear / 365.25)
+    quality = pd.Series("approved", index=index)
+    quality.iloc[:200] = "provisional"
+    quality.iloc[200:250] = "suspect"
+    half = explore.record_quality_half(pd.Series(values, index=index), "discharge", quality=quality)
+    assert half["change_points"] == [1991]
+    assert half["flagged_fraction"] == round(250 / len(index), 4)
+
+
+def _write_mirror(root, series, quality=None):
+    from aquascope.archive.observations import obs_path, series_to_csv_gz
+
+    path = obs_path(root, "discharge", "uk_ea", "8496ce69")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(series_to_csv_gz(series, quality=quality))
+    return path
+
+
+def test_assess_site_fills_the_quality_half_from_a_local_mirror(small_catalog, archive, tmp_path, monkeypatch):
+    index = pd.date_range("1960-01-01", "2019-12-31", freq="D")
+    series = pd.Series(np.where(index.year < 1991, 100.0, 50.0)
+                       + 5.0 * np.sin(2 * np.pi * index.dayofyear / 365.25), index=index)
+    quality = pd.Series("approved", index=index)
+    quality.iloc[:100] = "provisional"
+    _write_mirror(tmp_path, series, quality=quality)
+    monkeypatch.setenv(explore.ARCHIVE_MIRROR_ENV, str(tmp_path))
+
+    res = explore.assess_site(51.415, -0.308, problem="flood_risk")
+    ctx = res["context"]
+    assert ctx["completeness_by_variable"] == {"discharge": 1.0}
+    assert ctx["longest_gap_days"] == {"discharge": 0}
+    assert ctx["flagged_fraction"]["discharge"] == round(100 / len(index), 4)
+    assert ctx["change_points"] == {"discharge": [1991]}
+    ffa = _row_for(res, "at_site_flood_frequency")
+    assert ffa["status"] == MARGINAL and "1991" in ffa["reason"]
+    assert any("change point in 1991" in n for n in res["notes"])
+
+
+def test_assess_site_without_a_mirror_keeps_the_quality_half_empty(small_catalog, archive, monkeypatch):
+    monkeypatch.delenv(explore.ARCHIVE_MIRROR_ENV, raising=False)
+    with patch("aquascope.archive.observations.fetch_archived_series") as fetch:
+        res = explore.assess_site(51.415, -0.308)
+    fetch.assert_not_called()
+    ctx = res["context"]
+    assert ctx["completeness_by_variable"] == {}
+    assert ctx["longest_gap_days"] == {}
+    assert ctx["flagged_fraction"] == {}
+    assert ctx["change_points"] == {}
+    assert res["sufficiency"] and json.loads(json.dumps(res))
+    assert any("no local Archive mirror is configured" in n for n in res["notes"])
+
+
+def test_a_mirror_without_the_station_or_a_corrupt_file_is_a_note(small_catalog, archive, tmp_path, monkeypatch):
+    monkeypatch.setenv(explore.ARCHIVE_MIRROR_ENV, str(tmp_path))
+    res = explore.assess_site(51.415, -0.308)
+    assert res["context"]["completeness_by_variable"] == {}
+    assert any("holds no usable file" in n for n in res["notes"])
+
+    path = _write_mirror(tmp_path, _daily_record())
+    path.write_bytes(b"not a gzip file")
+    res = explore.assess_site(51.415, -0.308)
+    assert res["context"]["completeness_by_variable"] == {}
+    assert any("holds no usable file" in n for n in res["notes"])
+    assert json.loads(json.dumps(res))
