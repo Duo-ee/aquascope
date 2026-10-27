@@ -500,6 +500,58 @@
           </div>
         </div>
       </section>
+      <!-- Draw a reservoir (#662): a lake on a river and the flood it flattens; src/reservoir-map.js -->
+      <section id="reservoir" class="whatif route storm reservoir" aria-labelledby="rv-title" hidden>
+        <header class="wi-head">
+          <div>
+            <p class="wi-kicker">Draw a reservoir</p>
+            <h2 id="rv-title" class="wi-title">Draw the lake across a river</h2>
+            <p class="wi-sub">Level-pool routing at the dam, then on down the river</p>
+          </div>
+          <button type="button" class="wi-close rv-close" aria-label="Close Draw a reservoir" title="Close (Esc)">×</button>
+        </header>
+        <form id="rv-form" class="wi-form rv-form">
+          <label class="wi-slider"><span>Crest</span>
+            <input id="rv-crest" type="range" min="1" max="60" step="0.5" aria-label="Spillway crest, m above the lowest ground" />
+            <output id="rv-crest-out" for="rv-crest">10 m</output></label>
+          <label class="wi-slider"><span>Dam top</span>
+            <input id="rv-top" type="range" min="2" max="80" step="0.5" aria-label="Top of the dam, m above the lowest ground" />
+            <output id="rv-top-out" for="rv-top">15 m</output></label>
+          <label class="wi-slider"><span>Spillway</span>
+            <input id="rv-width" type="range" min="2" max="300" step="1" aria-label="Spillway width, m" />
+            <output id="rv-width-out" for="rv-width">30 m</output></label>
+          <p class="st-plain">Levels above the lowest ground in the lake; the spillway a broad-crested weir.</p>
+          <fieldset class="rt-kind rv-kind">
+            <legend class="visually-hidden">The flood</legend>
+            <label><input id="rv-kind-rp" type="radio" name="rv-kind" value="rp" checked /> The
+              <select id="rv-rp" aria-label="Return period, years">
+                <option value="2">2</option><option value="10">10</option><option value="25">25</option>
+                <option value="100">100</option></select>-year flow, over
+              <input id="rv-dur" type="number" min="1" max="720" step="1" aria-label="Hours" /> h</label>
+            <label><input id="rv-kind-peak" type="radio" name="rv-kind" value="peak" />
+              <input id="rv-peak" type="number" min="1" step="any" inputmode="decimal" placeholder="500"
+                     aria-label="Peak flow, m³/s" /> m³/s at the dam</label>
+            <label><input id="rv-kind-wave" type="radio" name="rv-kind" value="wave" />
+              <span id="rv-wave-words">the flood wave or storm on the map</span></label>
+          </fieldset>
+          <div class="wi-run-row">
+            <button id="rv-draw" type="button" class="btn small ghost">Draw the lake</button>
+            <button id="rv-run" type="submit" class="btn small primary">Route it through</button>
+          </div>
+        </form>
+        <p id="rv-status" class="wi-status" role="status" hidden></p>
+        <div id="rv-result" class="wi-result" hidden>
+          <p id="rv-head" class="rt-head"></p>
+          <div id="rv-chart"></div>
+          <dl id="rv-facts" class="st-facts"></dl>
+          <ul id="rv-notes" class="rv-notes"></ul>
+          <p id="rv-model" class="wi-model"></p>
+          <div class="wi-foot">
+            <button id="rv-replay" type="button" class="link-btn">Play the wave again</button>
+            <button id="rv-edit" type="button" class="link-btn wi-edit">Change the dam</button>
+          </div>
+        </div>
+      </section>
       <!-- Paint the globe (#657): one question at every gauge in view; src/paint.js and paint.css -->
       <section id="paint" class="paint" aria-labelledby="pt-title" hidden>
         <header class="pt-head">

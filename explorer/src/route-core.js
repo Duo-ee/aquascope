@@ -157,6 +157,8 @@ export function headline(res) {
 
 /** The action log's line for a run. */
 export function logLabel(res) {
+  const rv = res && res.reservoir;
+  if (rv) return `A flood through a reservoir, ${Number(rv.reduction_pct)} % lower past the dam`;
   const st = res && res.storm;
   if (st) return `Route a storm of ${Number(st.rain_mm)} mm in ${hoursWords(st.duration_h)}`;
   const i = (res && res.inflow) || {};

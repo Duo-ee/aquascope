@@ -43,7 +43,8 @@ test("the area is drawn closed, with its rain as its label", () => {
   const ring = fc.features[0].geometry.coordinates[0];
   assert.equal(ring.length, 5);
   assert.deepEqual(ring[0], ring[4]);
-  assert.equal(fc.features[0].properties.label, "50 mm in 6 h");
+  assert.equal(fc.features[1].properties.label, "50 mm in 6 h");
+  assert.deepEqual(fc.features[1].geometry.coordinates, [-3.475, 52.5]);
   assert.equal(fc.features[0].properties.live, 1);
   assert.equal(stormFeatures(null).features.length, 0);
   assert.equal(stormLabel({ rain_mm: 120, duration_h: 48 }), "120 mm in 2 days");

@@ -191,7 +191,7 @@ function frameResult(result) {
   const b = result && result.bbox;
   const box = b ? [[b[0], b[1]], [b[2], b[3]]] : reachedBounds(result);
   if (!box || !state.mapOk || !map) return;
-  const p = [panel(), $("storm")].find((el) => el && !el.hidden) || panel();
+  const p = [panel(), $("storm"), $("reservoir")].find((el) => el && !el.hidden) || panel();
   const pad = { top: 110, left: 40, right: 40, bottom: 170 };
   const lg = $("map-legend");
   if (lg && !lg.hidden && !narrow()) {
@@ -262,7 +262,7 @@ function placeRow(p) {
 function renderResult() {
   const box = $("rt-result");
   if (!box) return;
-  const mine = shown && target && !shown.result.storm && Number(shown.target.river_id) === target.river_id;
+  const mine = shown && target && !shown.result.storm && !shown.result.reservoir && Number(shown.target.river_id) === target.river_id;
   box.hidden = !mine;
   if (!mine) return;
   const r = shown.result;
