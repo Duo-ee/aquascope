@@ -89,7 +89,7 @@
 @media (max-width: 640px) {
   .replay {
     left: 0; right: 0; transform: none; bottom: 0; width: auto; border-radius: var(--radius) var(--radius) 0 0;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); max-height: 42vh; overflow: auto;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   }
   .replay { z-index: 12; }
   /* the sheet owns the bottom of a phone while a story plays: the time bar and the map's round buttons step aside */

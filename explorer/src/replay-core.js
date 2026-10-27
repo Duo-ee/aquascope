@@ -158,14 +158,17 @@ export function forecastBar(run, observed, { w = 168, h = 64 } = {}) {
   if (!run || run.median_cms === undefined) return "";
   const pad = 6;
   const vals = [run.low_cms, run.high_cms, run.median_cms, observed].filter((v) => Number.isFinite(Number(v))).map(Number);
-  const hi = Math.max(...vals) * 1.05;
+  const hi = Math.max(...vals) * 1.08;
   const x = scale(0, hi, pad, w - pad);
   const yb = h / 2;
-  let out = `<rect x="${x(run.low_cms).toFixed(1)}" y="${yb - 7}" width="${Math.max(2, x(run.high_cms) - x(run.low_cms)).toFixed(1)}" height="14" class="rp-range"/>` +
+  const at = (v) => (x(v) > w * 0.7 ? "end" : x(v) < w * 0.3 ? "start" : "middle");
+  let out = `<line x1="${pad}" x2="${w - pad}" y1="${yb + 14}" y2="${yb + 14}" class="rp-mk"/>` +
+    `<text x="${pad}" y="10" class="rp-sv">members, median ┃</text>` +
+    `<rect x="${x(run.low_cms).toFixed(1)}" y="${yb - 7}" width="${Math.max(2, x(run.high_cms) - x(run.low_cms)).toFixed(1)}" height="14" class="rp-range"/>` +
     `<line x1="${x(run.median_cms).toFixed(1)}" x2="${x(run.median_cms).toFixed(1)}" y1="${yb - 11}" y2="${yb + 11}" class="rp-med"/>`;
   if (Number.isFinite(Number(observed))) {
     out += `<path d="M${x(observed).toFixed(1)},${yb - 15}l-5,-8h10z" class="rp-obsmk"/>` +
-      `<text x="${x(observed).toFixed(1)}" y="${h - 4}" text-anchor="middle" class="rp-sv">gauge ${n0(observed)}</text>`;
+      `<text x="${x(observed).toFixed(1)}" y="${h - 4}" text-anchor="${at(observed)}" class="rp-sv">gauge ${n0(observed)} m³/s</text>`;
   }
   return `<svg class="rp-spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="The forecast's members for the peak day against the gauge">${out}</svg>`;
 }
