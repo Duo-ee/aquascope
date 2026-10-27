@@ -91,9 +91,11 @@
     left: 0; right: 0; transform: none; bottom: 0; width: auto; border-radius: var(--radius) var(--radius) 0 0;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); max-height: 42vh; overflow: auto;
   }
-  .replay.playing ~ .timebar-wrap, body.rp-on .timebar-wrap { display: none; }
+  .replay { z-index: 12; }
+  /* the sheet owns the bottom of a phone while a story plays: the time bar and the map's round buttons step aside */
+  body.rp-on .timebar-wrap, body.rp-on #map-ask .ma-bar, body.rp-on #btn-panel { display: none; }
   .rp-stop { grid-template-columns: 1fr; }
   .rp-chart { display: none; }
   .rp-note { font-size: .8rem; }
-  .rp-src { white-space: normal; }
+  .rp-src { font-size: .62rem; }
 }

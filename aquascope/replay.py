@@ -791,7 +791,8 @@ def wave(river_id: int, rows: list[Any], *, source: str, peak_date: Any, lat: fl
             continue
         lag = None if start_peak is None else round(float(pl["peak_h"]) - float(start_peak), 1)
         when = datetime.combine(t0, datetime.min.time()) + timedelta(hours=float(pl["peak_h"]))
-        stops.append({"name": pl.get("name"), "kind": pl.get("kind"), "lat": pl.get("lat"), "lon": pl.get("lon"),
+        stops.append({"name": _display_name(str(pl.get("name") or "")), "kind": pl.get("kind"), "lat": pl.get("lat"),
+                      "lon": pl.get("lon"),
                       "along_km": pl.get("along_km"), "peak_cms": pl.get("peak_cms"), "lag_h": lag,
                       "peak_at": when.strftime("%Y-%m-%dT%H:00")})
     return {

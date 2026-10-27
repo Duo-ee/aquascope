@@ -492,8 +492,9 @@ async function onCellClick(e) {
     res = { error: `Could not read the events: ${err.message}` };
   }
   if (my !== popupRun || !popup) return;
-  popup.setHTML(cellCard(p, months, eventsHtml(res, months) +
-    '<div class="fp-rp-slot"></div><button class="btn tiny fp-open" type="button">Open this place</button>'));
+  // Replay's buttons (#659) go first: the event list can be long.
+  popup.setHTML(cellCard(p, months, '<div class="fp-rp-slot"></div>' + eventsHtml(res, months) +
+    '<button class="btn tiny fp-open" type="button">Open this place</button>'));
   const btn = popup.getElement() && popup.getElement().querySelector(".fp-open");
   if (btn) btn.addEventListener("click", () => { closePopup(); actions.selectPoint(coords[1], coords[0], { fly: false }); });
   void offerReplay(my, coords, months, res);
