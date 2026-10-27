@@ -55,7 +55,8 @@ import numpy as np
 __all__ = [
     "ALPHA", "CAP_HOURS", "G", "H_DRY", "N_CHANNEL", "N_FLOODPLAIN", "RETURN_PERIODS", "STEADY_TOL", "THETA",
     "TERRARIUM", "annual_maxima", "burn_channel", "cell_velocity", "channel_depth", "compare_depths", "corridor",
-    "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "frame_times", "jrc_on_grid",
+    "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "forecast_series", "frame_times",
+    "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
     "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "return_period_for", "ritter", "run_grid",
     "run_summary", "simulate", "stream_reaches", "terrain_grid", "terrain_window", "terrarium_elevation", "window",
 ]
@@ -500,19 +501,28 @@ def _line_cells(grid: dict[str, Any], line: list[tuple[float, float]]) -> list[t
     return out
 
 
-def burn_channel(z: np.ndarray, cells: list[tuple[int, int]], depth_m: float, into: np.ndarray | None = None
-                 ) -> np.ndarray:
+#: The most a channel is cut below the terrain beyond its own depth (m). Where the drawn line runs over ground
+#: higher than that above the river upstream, it is off the valley there, and is not trenched through.
+MAX_CUT_M = 10.0
+
+
+def burn_channel(z: np.ndarray, cells: list[tuple[int, int]], depth_m: float, into: np.ndarray | None = None,
+                 max_cut_m: float | None = None) -> np.ndarray:
     """``z`` with a channel ``depth_m`` deep along ``cells`` (ordered upstream to downstream): a copy, or written
     into ``into`` (where another channel may already be burnt; the deeper bed wins).
 
     The bank line is the terrain ``z`` along the cells made non-increasing downstream (a running minimum), so the
-    burnt bed has no pits or bumps from the terrain's noise; the bed is that line minus ``depth_m``."""
+    burnt bed has no pits or bumps from the terrain's noise; the bed is that line minus ``depth_m``, but never
+    more than ``max_cut_m`` below the terrain plus the depth (None: no limit)."""
     out = np.array(z, dtype="f8") if into is None else into
     if not cells:
         return out
     bank = np.minimum.accumulate(np.array([z[r, c] for r, c in cells], dtype="f8"))
     for (r, c), b in zip(cells, bank):
-        out[r, c] = min(out[r, c], b - depth_m)
+        bed = b - depth_m
+        if max_cut_m is not None:
+            bed = max(bed, z[r, c] - depth_m - max_cut_m)
+        out[r, c] = min(out[r, c], bed)
     return out
 
 
@@ -749,6 +759,8 @@ def matched_flow(click: dict[str, Any], q: float, other: dict[str, Any]) -> floa
 CORRIDOR_KM = 6.0
 #: Ground this high above the nearest river is outside the valley the grid keeps (m).
 VALLEY_M = 10.0
+#: The rivers that make the valley: those with a 100-year flow at least this share of the clicked reach's.
+VALLEY_SHARE = 0.1
 #: The search margin around the river for the valley (km), and the cells kept around it.
 VALLEY_PAD_KM = 3.0
 VALLEY_PAD_CELLS = 6
@@ -778,11 +790,57 @@ def stream_reaches(bounds: list[float], zoom: int = STREAM_ZOOM, cap: int = 64) 
         raise ValueError(f"{len(tiles)} stream tiles for this grid; the most read is {cap}")
     out: dict[int, dict[str, Any]] = {}
     for tx, ty in tiles:
+        box = (tx * 4096.0, ty * 4096.0, (tx + 1) * 4096.0, (ty + 1) * 4096.0)
         for rid, item in rivers._tile_reaches(zoom, tx, ty).items():
             r = out.setdefault(int(rid), {"order": int(item.get("order") or 0), "lines": []})
             for line in item["lines"]:
-                r["lines"].append([rivers._lonlat(px, py, zoom) for px, py in line])
+                # Each tile carries its lines a little past its edges; cut to the tile itself, so the pieces of
+                # one reach meet end to end at the tile edges instead of overlapping.
+                for part in _clip_line(line, box):
+                    r["lines"].append([rivers._lonlat(px, py, zoom) for px, py in part])
     return out
+
+
+def _clip_line(line: list[tuple[float, float]], box: tuple[float, float, float, float]
+               ) -> list[list[tuple[float, float]]]:
+    """A polyline cut to a box (x0, y0, x1, y1): the parts inside, each a polyline (Liang-Barsky per segment)."""
+    x0, y0, x1, y1 = box
+    parts: list[list[tuple[float, float]]] = []
+    cur: list[tuple[float, float]] = []
+    for (ax, ay), (bx, by) in zip(line, line[1:]):
+        dx, dy = bx - ax, by - ay
+        t0, t1 = 0.0, 1.0
+        ok = True
+        for p, q in ((-dx, ax - x0), (dx, x1 - ax), (-dy, ay - y0), (dy, y1 - ay)):
+            if p == 0:
+                if q < 0:
+                    ok = False
+                    break
+                continue
+            t = q / p
+            if p < 0:
+                t0 = max(t0, t)
+            else:
+                t1 = min(t1, t)
+        if not ok or t0 > t1:
+            if len(cur) >= 2:
+                parts.append(cur)
+            cur = []
+            continue
+        a = (ax + t0 * dx, ay + t0 * dy)
+        b = (ax + t1 * dx, ay + t1 * dy)
+        if cur and cur[-1] == a:
+            cur.append(b)
+        else:
+            if len(cur) >= 2:
+                parts.append(cur)
+            cur = [a, b]
+        if t1 < 1.0:
+            parts.append(cur)
+            cur = []
+    if len(cur) >= 2:
+        parts.append(cur)
+    return parts
 
 
 def _accumulated(net: Any, i: int) -> dict[int, float]:
@@ -922,7 +980,7 @@ def plan_window(river_id: int | None = None, lat: float | None = None, lon: floa
     near = stream_reaches([bw - m / kx, bs - m / 111.32, be + m / kx, bn + m / 111.32]) if reaches_given is None \
         else reaches
     known = {int(r) for r in near} | {int(r) for r in reaches}
-    lines_of = {**{int(r): v for r, v in near.items()}, **{int(r): v for r, v in reaches.items()}}
+    lines_of = {**{int(r): v for r, v in reaches.items()}, **{int(r): v for r, v in near.items()}}
     drawn = {r for r, item in lines_of.items() if net.index(r) is not None
              and any(_line_cells(win, ln) for ln in item["lines"])}
     if rid not in drawn:
@@ -949,38 +1007,105 @@ def plan_window(river_id: int | None = None, lat: float | None = None, lon: floa
 # ── the grid: valley, channels, inflows and edges ──────────────────────────
 
 
-def _chain(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """A reach's cells in order along it: from one end of the 8-connected set, by steps through it (cells it cannot
-    reach follow, by distance)."""
-    cells = list(dict.fromkeys(cells))
-    if len(cells) < 3:
-        return cells
-    have = set(cells)
+def _reach_cells(win: dict[str, Any], lines: list[list[tuple[float, float]]], tol_deg: float = 5e-4
+                 ) -> list[tuple[int, int]]:
+    """A reach's cells in order along its line. The stream tiles cut a reach's line into pieces, one a tile; the
+    pieces are put back end to end: two ends closer than ``tol_deg`` join, the walk starts at an end that joins
+    nothing and follows the joins, so a long winding reach is never folded back on itself (pieces it cannot reach
+    follow, nearest first). Upstream or downstream is decided later."""
+    pieces = [list(ln) for ln in lines if len(ln) >= 2]
+    if not pieces:
+        return []
 
-    def bfs(start: tuple[int, int]) -> dict[tuple[int, int], int]:
-        dist = {start: 0}
-        queue = [start]
-        k = 0
-        while k < len(queue):
-            r, c = queue[k]
-            k += 1
-            for dr in (-1, 0, 1):
-                for dc in (-1, 0, 1):
-                    nb = (r + dr, c + dc)
-                    if nb in have and nb not in dist:
-                        dist[nb] = dist[(r, c)] + 1
-                        queue.append(nb)
-        return dist
+    def gap(p: tuple[float, float], q: tuple[float, float]) -> float:
+        return math.hypot(p[0] - q[0], p[1] - q[1])
 
-    cr = sum(r for r, _ in cells) / len(cells)
-    cc = sum(c for _, c in cells) / len(cells)
-    far = max(cells, key=lambda p: (p[0] - cr) ** 2 + (p[1] - cc) ** 2)
-    d0 = bfs(far)
-    end = max(d0, key=lambda p: d0[p])
-    d1 = bfs(end)
-    out = sorted(d1, key=lambda p: d1[p])
-    rest = sorted((p for p in cells if p not in d1), key=lambda p: (p[0] - end[0]) ** 2 + (p[1] - end[1]) ** 2)
-    return out + rest
+    def partner(i: int, end: int) -> tuple[int, int] | None:
+        pt = pieces[i][-1 if end else 0]
+        best = None
+        for j in range(len(pieces)):
+            if j == i:
+                continue
+            for e in (0, 1):
+                d = gap(pt, pieces[j][-1 if e else 0])
+                if d <= tol_deg and (best is None or d < best[0]):
+                    best = (d, j, e)
+        return None if best is None else (best[1], best[2])
+
+    free = [(i, e) for i in range(len(pieces)) for e in (0, 1) if partner(i, e) is None]
+    i, e = free[0] if free else (0, 0)
+    seen: set[int] = set()
+    ordered = []
+    while i is not None and i not in seen:
+        seen.add(i)
+        piece = pieces[i] if e == 0 else pieces[i][::-1]   # walk in from end e
+        ordered.append(piece)
+        nxt = partner(i, 1 - e)
+        i, e = (nxt if nxt and nxt[0] not in seen else (None, 0))
+    left = [k for k in range(len(pieces)) if k not in seen]
+    while left:
+        end = ordered[-1][-1]
+        j = min(left, key=lambda k: min(gap(end, pieces[k][0]), gap(end, pieces[k][-1])))
+        ordered.append(pieces[j] if gap(end, pieces[j][0]) <= gap(end, pieces[j][-1]) else pieces[j][::-1])
+        left.remove(j)
+    cells: list[tuple[int, int]] = []
+    for piece in ordered:
+        for rc in _line_cells(win, piece):
+            if not cells or rc != cells[-1]:
+                cells.append(rc)
+    return list(dict.fromkeys(cells))
+
+
+#: How far (cells) a river line is moved onto the lowest ground beside it: GEOGLOWS's lines come from another,
+#: coarser terrain model, and in a winding valley they cross the spurs (a channel burnt there would be a trench).
+SNAP_CELLS = 2
+
+
+def _bresenham(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
+    """The 8-connected cells from ``a`` to ``b``, ``b`` included, ``a`` not."""
+    (r0, c0), (r1, c1) = a, b
+    n = max(abs(r1 - r0), abs(c1 - c0))
+    return [(int(round(r0 + (r1 - r0) * k / n)), int(round(c0 + (c1 - c0) * k / n))) for k in range(1, n + 1)]
+
+
+def snap_chain(chain: list[tuple[int, int]], z: np.ndarray, radius: int = SNAP_CELLS) -> list[tuple[int, int]]:
+    """A river's ordered cells moved onto the lowest terrain within ``radius`` cells of each, joined up again
+    (8-connected) and without repeats: where the drawn line runs along the valley floor it stays put, where it
+    cuts across a spur it moves down beside it."""
+    if radius <= 0 or not chain:
+        return list(chain)
+    ny, nx = z.shape
+    moved = []
+    for r, c in chain:
+        r0, r1, c0, c1 = max(0, r - radius), min(ny, r + radius + 1), max(0, c - radius), min(nx, c + radius + 1)
+        yy, xx = np.mgrid[r0:r1, c0:c1]
+        # The lowest cell, the nearest of the lowest when several tie (a flat floor keeps the line where it is).
+        k = int(np.argmin(z[r0:r1, c0:c1] + 1e-6 * ((yy - r) ** 2 + (xx - c) ** 2)))
+        moved.append((r0 + k // (c1 - c0), c0 + k % (c1 - c0)))
+    out = [moved[0]]
+    for cell in moved[1:]:
+        if cell == out[-1]:
+            continue
+        for step in _bresenham(out[-1], cell):
+            if step not in out[-3:]:
+                out.append(step)
+    return list(dict.fromkeys(out))
+
+
+def four_connected(cells: list[tuple[int, int]], z: np.ndarray) -> list[tuple[int, int]]:
+    """Ordered cells with a cell added at every diagonal step (the lower of the two that close it): water moves
+    between cells only through their faces, so a channel that steps diagonally would be dammed at each step by
+    whatever ground stands at the corner."""
+    if not cells:
+        return []
+    out = [cells[0]]
+    for r, c in cells[1:]:
+        pr, pc = out[-1]
+        if abs(r - pr) == 1 and abs(c - pc) == 1:
+            a, b = (r, pc), (pr, c)
+            out.append(a if z[a] <= z[b] else b)
+        out.append((r, c))
+    return list(dict.fromkeys(out))
 
 
 def _nearest(cells: list[tuple[int, int]], others: list[tuple[int, int]]) -> float:
@@ -1078,9 +1203,15 @@ def prepare_grid(plan: dict[str, Any], z: Any, choice: dict[str, Any] | None = N
     reaches = {int(k): v for k, v in plan["reaches"].items()}
     click = int(plan["river_id"])
     click_curve = reaches[click]["curve"]
+    # The valley is the big rivers' (a 100-year flow at least VALLEY_SHARE of the clicked reach's): the small streams
+    # in the hills around would otherwise make every slope a valley.
+    q100 = flow_for(click_curve, 100)
     chan0 = np.zeros(z0.shape, dtype=bool)
-    for r in reaches.values():
-        for ln in r["lines"]:
+    for r, v in reaches.items():
+        cv = v["curve"]
+        if r != click and ("q" not in cv or flow_for(cv, 100) < VALLEY_SHARE * q100):
+            continue
+        for ln in v["lines"]:
             for rc in _line_cells(win0, ln):
                 chan0[rc] = True
     r0, r1, c0, c1 = _valley_box(z0, chan0, valley_m)
@@ -1091,12 +1222,24 @@ def prepare_grid(plan: dict[str, Any], z: Any, choice: dict[str, Any] | None = N
         win = window(win["x0"] // 2, win["y0"] // 2, zc.shape[1], zc.shape[0], win["zoom"] - 1)
     ny, nx = zc.shape
     dx = win["dx"]
-    raw = {r: [c for ln in v["lines"] for c in _line_cells(win, ln)] for r, v in reaches.items()}
+    raw = {r: _reach_cells(win, v["lines"]) for r, v in reaches.items()}
     raw = {r: cells for r, cells in raw.items() if cells}
     order: dict[int, list[tuple[int, int]]] = {}
     for r, cells in raw.items():
         up = [c for k in reaches[r]["children"] for c in raw.get(k, [])]
-        order[r] = _orient_chain(_chain(cells), zc, raw.get(reaches[r]["ds"], []), up)
+        order[r] = snap_chain(_orient_chain(cells, zc, raw.get(reaches[r]["ds"], []), up), zc)
+    # Each reach's channel runs on into the reach below it: from its last cell to the nearest cell of the next, so a
+    # confluence or a gap between two lines never leaves a bank of ground across the river.
+    for r, cells in order.items():
+        below = order.get(reaches[r]["ds"])
+        if not below or not cells:
+            continue
+        last = cells[-1]
+        tgt = min(below, key=lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2)
+        if max(abs(tgt[0] - last[0]), abs(tgt[1] - last[1])) > 1:
+            order[r] = cells + _bresenham(last, tgt)[:-1]
+        order[r] = four_connected(order[r] + [tgt], zc)[:-1] if tgt not in order[r] else order[r]
+    order = {r: four_connected(cells, zc) for r, cells in order.items()}
     stem = [r for r in plan.get("stem", []) if r in order] or [click]
     slope = chain_slope(zc, [c for r in stem for c in order[r]], dx)
     slopes = {r: slope if r in stem or len(cells) < 20 else chain_slope(zc, cells, dx) for r, cells in order.items()}
@@ -1112,7 +1255,7 @@ def prepare_grid(plan: dict[str, Any], z: Any, choice: dict[str, Any] | None = N
         if q2_of(r) <= 0:
             continue
         depth = channel_depth(q2_of(r), dx, slopes[r])
-        burn_channel(zc, order[r], depth, into=zb)
+        burn_channel(zc, order[r], depth, into=zb, max_cut_m=MAX_CUT_M)
         for rc in order[r]:
             n[rc] = N_CHANNEL
         channels[r] = round(depth, 2)
@@ -1298,6 +1441,80 @@ def _join(segments: list[tuple[float, float, float, float]]) -> list[list[tuple[
         else:
             lines.append([(x1, y1), (x2, y2)])
     return lines
+
+
+# ── hydrographs: the forecast, and a wave routed down the river ───────────
+
+
+def forecast_series(river_id: int, *, stats: dict[str, Any] | None = None) -> dict[str, Any]:
+    """GEOGLOWS's 15-day forecast at a reach as a hydrograph for :func:`prepare_grid`: the ensemble mean
+    (``flow_avg``, hourly then 3-hourly) from its first time, with its peak and when it comes."""
+    from datetime import datetime
+
+    from aquascope import rivers
+
+    stats = stats if stats is not None else rivers.forecast_stats(int(river_id))
+    if stats.get("error"):
+        raise LookupError(stats["error"])
+    times, q = [], []
+    for t, v in zip(stats.get("datetime") or [], stats.get("flow_avg") or []):
+        if v is None:
+            continue
+        times.append(datetime.fromisoformat(str(t).replace("Z", "+00:00")).replace(tzinfo=None))
+        q.append(float(v))
+    if len(q) < 2:
+        raise LookupError("GEOGLOWS returned no forecast for this reach")
+    t0 = times[0]
+    k = int(np.argmax(q))
+    return {"t_s": [(t - t0).total_seconds() for t in times], "q": q, "start": t0.isoformat(timespec="minutes"),
+            "peak_cms": round(q[k], 3), "peak_at": times[k].isoformat(timespec="minutes"),
+            "label": f"GEOGLOWS's 15-day forecast from {t0:%d %b %H:%M} UTC (ensemble mean)",
+            "source": "GEOGLOWS v2 forecast (ECMWF ensemble), CC BY 4.0"}
+
+
+def routed_series(plan: dict[str, Any], return_period: float = 100, *, duration_h: float = 24.0,
+                  upstream_km: float = 30.0, net: Any = None, curves: dict[int, dict[str, Any]] | None = None,
+                  fetch_maxima: Callable[[str], bytes | None] | None = None) -> dict[str, Any]:
+    """The wave Route it would send (#656), as a hydrograph at the clicked reach: a triangle peaking at the
+    ``return_period``-year flow of the main river ``upstream_km`` of drawn river above the click (aquascope.routing's
+    ``hydrograph``), rising for a third of ``duration_h``, routed down to the clicked reach by Muskingum with
+    GEOGLOWS's own k and x (aquascope.routing's ``route_network``)."""
+    from aquascope import rivers, routing
+
+    rid = int(plan["river_id"])
+    net = net or rivers._network_for(rid, plan.get("lat"), plan.get("lon"))
+    i = net.index(rid)
+    reaches = {int(k): v for k, v in plan["reaches"].items()}
+    acc = _accumulated(net, i)
+    path = [i]
+    gone = 0.0
+    while gone < upstream_km and len(path) < 400:
+        kids = net.children(path[-1])
+        if not kids:
+            break
+        j = max(kids, key=lambda c: acc.get(c, 0.0))
+        path.append(j)
+        item = reaches.get(int(net.ids[j]))
+        gone += _line_km(item["lines"]) if item else 2.0
+    top = path[-1]
+    top_id = int(net.ids[top])
+    if curves is None or top_id not in curves:
+        years, am = annual_maxima([top_id], fetch=fetch_maxima)
+        curves = {**(curves or {}), top_id: flow_curve(years, am.get(top_id, []))}
+    if "q" not in curves[top_id]:
+        raise LookupError(f"reach {top_id} has no flood flows")
+    peak = flow_for(curves[top_id], return_period)
+    k, x, ds_index = routing._params(net)
+    order = list(reversed(path))
+    hours = int(math.ceil(duration_h * 3))
+    q_in = routing.hydrograph(peak, duration_h, hours, shape="triangle")
+    out = routing.route_network(order, ds_index, k, x, hours, inflow={top: q_in})
+    q = [float(v) for v in out[i]]
+    return {"t_s": [h * float(routing.DT_S) for h in range(len(q))], "q": q, "peak_cms": round(max(q), 3),
+            "entered_cms": round(peak, 3), "from_river_id": top_id, "km": round(gone, 1),
+            "label": (f"Route it's {return_period:g}-year wave: {peak:,.0f} m³/s entering {gone:,.0f} km upstream "
+                      f"over {duration_h:g} h, routed down"),
+            "source": routing.METHOD["name"]}
 
 
 # ── writing a run ───────────────────────────────────────────────────────────

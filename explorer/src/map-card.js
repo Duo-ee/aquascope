@@ -423,7 +423,7 @@ function routeButton(t) {
 function floodItButton(t) {
   return {
     id: "floodit", label: "Flood it", hidden: !actions.openFloodIt || !t,
-    title: "Pour this reach's 100-year flow in for 6 hours and watch where the water goes (a screening flood)",
+    title: "A screening flood of the valley at this reach's 100-year flow, every river in view fed, run on your GPU",
     onClick: () => { if (t && actions.openFloodIt) actions.openFloodIt(t); },
   };
 }

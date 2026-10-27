@@ -314,9 +314,9 @@ def test_prepare_grid_feeds_every_river_and_opens_the_outlet():
     # The main river's reach 1 crosses the west edge and brings its own flow in there, the tributary 10 enters from
     # the north edge, the headwater 11 starts inside; reaches 2, 3 and 4 have rivers above them in the grid.
     assert set(by) == {1, 10, 11}
-    assert by[1]["enters"] and by[1]["cell"][1] == 0
+    assert by[1]["enters"] and by[1]["cell"][1] <= fs.SNAP_CELLS
     assert by[1]["flow"] == pytest.approx(fs.flow_for(_curve(52.0), 100))
-    assert by[10]["enters"] and by[10]["cell"][0] == 0
+    assert by[10]["enters"] and by[10]["cell"][0] <= fs.SNAP_CELLS
     assert not by[11]["enters"]
     assert g["click"]["flow_cms"] == pytest.approx(fs.flow_for(_curve(54.0), 100))
     # The outlet: a normal-depth outfall on the east edge across the valley floor; walls elsewhere.
@@ -394,3 +394,37 @@ def test_the_annual_maxima_store_is_searched_by_id():
     assert years == [1940, 1941, 1942]
     assert set(got) == {20, 50}
     assert got[20].tolist() == [1.0, 8.0, 15.0] and got[50].tolist() == [4.0, 11.0, 18.0]
+
+
+def test_channel_cells_follow_the_valley_and_carry_water_through_faces():
+    z = np.full((7, 9), 10.0)
+    z[4, :] = 5.0                                  # the valley floor runs along row 4
+    line = [(2, c) for c in range(9)]              # the drawn line runs two cells off it, over the bank
+    snapped = fs.snap_chain(line, z)
+    assert all(r == 4 for r, _ in snapped) and len(snapped) == 9
+    # A diagonal step gets the lower of the two cells that close it, so water can pass through faces.
+    zz = np.zeros((3, 3))
+    zz[0, 1] = 9.0
+    assert fs.four_connected([(0, 0), (1, 1)], zz) == [(0, 0), (1, 0), (1, 1)]
+    # A cut is never deeper than the cap below the terrain plus the channel's own depth.
+    hill = np.array([[5.0, 30.0, 4.0]])
+    bed = fs.burn_channel(hill, [(0, 0), (0, 1), (0, 2)], 1.0, max_cut_m=10.0)
+    assert bed[0].tolist() == [4.0, 19.0, 3.0]
+    assert fs.burn_channel(hill, [(0, 0), (0, 1), (0, 2)], 1.0)[0, 1] == 4.0
+
+
+def test_stream_tile_pieces_are_cut_to_their_tiles_and_joined_end_to_end():
+    parts = fs._clip_line([(-10.0, 5.0), (5.0, 5.0), (5.0, 20.0)], (0.0, 0.0, 10.0, 10.0))
+    assert parts == [[(0.0, 5.0), (5.0, 5.0), (5.0, 10.0)]]
+    assert fs._clip_line([(20.0, 20.0), (30.0, 30.0)], (0.0, 0.0, 10.0, 10.0)) == []
+    zoom = 14
+    x0, y0 = fs._world_px(-2.0, 52.0, zoom)
+    win = fs.window(int(x0), int(y0), 60, 20, zoom)
+    lon = lambda c: fs._px_lonlat(int(x0) + c, int(y0), zoom)[0]  # noqa: E731
+    lat = fs._px_lonlat(int(x0), int(y0) + 10.5, zoom)[1]
+    # Three pieces of one line, given out of order and one reversed: the walk puts them back in order.
+    pieces = [[(lon(40), lat), (lon(58), lat)], [(lon(2), lat), (lon(20), lat)], [(lon(40), lat), (lon(20), lat)]]
+    cells = fs._reach_cells(win, pieces)
+    cols = [c for _, c in cells]
+    assert cols == sorted(cols) or cols == sorted(cols, reverse=True)
+    assert len(cells) >= 55
