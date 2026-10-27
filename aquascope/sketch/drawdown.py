@@ -223,6 +223,26 @@ def _round_ll(lon: np.ndarray, lat: np.ndarray) -> list[list[float]]:
     return [[round(float(a), 6), round(float(b), 6)] for a, b in zip(lon, lat)]
 
 
+def _thin(x: np.ndarray, y: np.ndarray, parts: int = 240) -> tuple[np.ndarray, np.ndarray]:
+    """Keep the points of a line at least 1/``parts`` of its length apart (the tensor grid crowds them where it
+    closes in on a well), and its ends: the same line, a fraction of the points."""
+    seg = np.hypot(np.diff(x), np.diff(y))
+    total = float(seg.sum())
+    if len(x) <= 24 or total <= 0:
+        return x, y
+    step = total / parts
+    keep = [0]
+    run = 0.0
+    for k, ds in enumerate(seg, start=1):
+        run += ds
+        if run >= step:
+            keep.append(k)
+            run = 0.0
+    if keep[-1] != len(x) - 1:
+        keep.append(len(x) - 1)
+    return x[keep], y[keep]
+
+
 def _contours(v: np.ndarray, xs: np.ndarray, ys: np.ndarray, plane: _Plane,
               levels: list[float]) -> list[dict[str, Any]]:
     out = []
@@ -234,7 +254,9 @@ def _contours(v: np.ndarray, xs: np.ndarray, ys: np.ndarray, plane: _Plane,
                 continue
             fi = np.array([p[0] for p in line])
             fj = np.array([p[1] for p in line])
-            lon, lat = plane.lonlat(np.interp(fj, jj, xs), np.interp(fi, ii, ys))
+            x, y = np.interp(fj, jj, xs), np.interp(fi, ii, ys)
+            x, y = _thin(x, y)
+            lon, lat = plane.lonlat(x, y)
             lines.append(_round_ll(lon, lat))
         if lines:
             out.append({"level": level, "label": f"{level:g} m", "lines": lines})
@@ -278,7 +300,7 @@ def drawdown_map(wells: Iterable[Any], *, days: float = DEFAULTS["days"],
     5 cm line reaches from the wells, the largest well alone), ``image`` (a coarse grid of the drawdown over the bbox,
     north row first, for the fill), the aquifer, the method, the assumptions, the defaults and their ranges with
     their source. ``frames`` (True, or a list of days) adds the cone at those times (by default :data:`FRAME_DAYS` up
-    to ``days``), for the time bar. Numbers from code."""
+    to ``days``), for the time bar, each with its own image when ``image``. Numbers from code."""
     ws = wells_from(wells)
     t, s, d, rw = _aquifer(transmissivity, storativity, days, well_radius)
     plane = _plane(ws)
@@ -312,13 +334,16 @@ def drawdown_map(wells: Iterable[Any], *, days: float = DEFAULTS["days"],
         "ranges": {k: list(v_) for k, v_ in RANGES.items()}, "ranges_source": RANGES_SOURCE,
         "check": CHECK_LINE,
     }
+    gxs = np.linspace(xs[0], xs[-1], IMAGE_CELLS)
+    gys = np.linspace(ys[-1], ys[0], IMAGE_CELLS)   # north row first, as an image
+    ix, iy = np.meshgrid(gxs, gys)
+
+    def picture(days_: float) -> dict[str, Any]:
+        img = _field(ws, xw, yw, ix, iy, t, s, days_, rw)
+        return {"bbox": bbox, "nx": IMAGE_CELLS, "ny": IMAGE_CELLS, "values": [round(float(x), 3) for x in img.ravel()]}
+
     if image:
-        gxs = np.linspace(xs[0], xs[-1], IMAGE_CELLS)
-        gys = np.linspace(ys[-1], ys[0], IMAGE_CELLS)   # north row first, as an image
-        ix, iy = np.meshgrid(gxs, gys)
-        img = _field(ws, xw, yw, ix, iy, t, s, d, rw)
-        out["image"] = {"bbox": bbox, "nx": IMAGE_CELLS, "ny": IMAGE_CELLS,
-                        "values": [round(float(x), 3) for x in img.ravel()]}
+        out["image"] = picture(d)
     if frames:
         times = sorted({float(x) for x in (FRAME_DAYS if frames is True else frames) if 0 < float(x) <= d} | {d})
         out["frames"] = []
@@ -327,7 +352,8 @@ def drawdown_map(wells: Iterable[Any], *, days: float = DEFAULTS["days"],
             out["frames"].append({"days": tt, "contours": _contours(fv, xs, ys, plane, levels),
                                   "max_m": round(float(max(_field(ws, xw, yw, np.array(a), np.array(b), t, s, tt, rw)
                                                            for a, b in zip(xw, yw))), 3),
-                                  "reach_m": round(_reach(q_max, t, s, tt, EDGE_M), 1)})
+                                  "reach_m": round(_reach(q_max, t, s, tt, EDGE_M), 1),
+                                  **({"image": picture(tt)} if image else {})})
     out["summary"] = summary(out)
     return out
 

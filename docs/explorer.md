@@ -584,6 +584,17 @@ Severn in Storm Bert and the French Broad in Hurricane Helene) are in [Replay an
 
 ![Replay: the gauge at Saxons Lode against GEOGLOWS, November 2024](img/replay/severn-gauge-desktop.jpg)
 
+## The sketchpad
+
+Draw on the map and a small, checked model recomputes. **Drop a well** (the pump mark in the map tools): click the map
+and the well's drawdown cone is drawn round it as contour lines; drop more and they add, drag one and the cone
+follows, play the cone growing on the time bar, and open a well's card for its numbers (and, over your MODFLOW model,
+what the model's well cell would read). Ask the map reads "drop a well at Lyon pumping 2000 m3/day". Theis with
+superposition, checked against Fetter's worked example and USGS PP 708's table of W(u). See
+[The sketchpad](sketchpad.md).
+
+![Drop a well: two cones near Lyon](img/sketchpad/well-two-desktop.jpg)
+
 ## Map layers
 
 The rail is a layer stack, and every layer in it is keyless and free to use.

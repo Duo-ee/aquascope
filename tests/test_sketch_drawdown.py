@@ -175,3 +175,15 @@ def test_cli_and_mcp(capsys, tmp_path):
     assert "draws the water down" in text and "Fetter" in text and "PP 708" in text
     fc = json.loads(gj.read_text())
     assert fc["features"][-1]["geometry"]["type"] == "Point"
+
+
+def test_explorer_defaults_are_the_package_defaults():
+    from pathlib import Path
+
+    core = (Path(__file__).resolve().parents[1] / "explorer" / "src" / "well-core.js").read_text()
+    d = dd.DEFAULTS
+    want = (f"export const DEFAULTS = {{ rate: {d['rate_m3_day']:g}, T: {d['transmissivity_m2_day']:g}, "
+            f"S: 1e-4, days: {d['days']:g} }};")
+    assert dd.DEFAULTS["storativity"] == 1e-4 and want in core
+    html = (Path(__file__).resolve().parents[1] / "explorer" / "index.html").read_text()
+    assert 'id="wl-rate-new" type="number" min="1" step="any" inputmode="decimal" value="1000"' in html
