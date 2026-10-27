@@ -229,6 +229,8 @@ def test_a_storm_can_fill_the_reservoir(toy, monkeypatch):
                              hours=200)
     assert res["ok"] and res["reservoir"]["peak_out_cms"] < res["reservoir"]["peak_in_cms"]
     assert "storm" in res["reservoir"]["what"]
+    w = res["reservoir"]["without"]
+    assert w["furthest_river_id"] == IDS["C"] and w["furthest_peak_with_cms"] < w["furthest_peak_cms"]
 
 
 def test_a_flood_that_misses_the_dam_says_so(toy, monkeypatch):
@@ -268,3 +270,35 @@ def test_cli_and_mcp_route_a_drawn_reservoir(toy, monkeypatch, capsys):
     cli.main()
     out = capsys.readouterr().out
     assert "At the dam: in " in out and "% lower" in out and "NEH" in out
+
+
+# ── Ask the map's draw_reservoir ────────────────────────────────────────────
+
+
+def test_the_map_reads_a_reservoir_and_checks_it():
+    from aquascope import map_commands as mc
+
+    assert mc.RESERVOIR_DEFAULTS["crest_m"] == rv.DEFAULTS["crest_m"]
+    assert mc.RESERVOIR_DEFAULTS["rise_m"] == rv.DEFAULTS["rise_m"]
+    assert mc.RESERVOIR_DEFAULTS["width_m"] == rv.DEFAULTS["width_m"]
+    for text, want in [
+        ("draw a reservoir here", {"area": "drawn", "crest_m": 10.0, "top_m": 15.0, "width_m": 30.0,
+                                   "return_period": 100.0}),
+        ("draw a reservoir with a 40 m spillway at 12 m", {"crest_m": 12.0, "top_m": 17.0, "width_m": 40.0}),
+        ("put a dam here and route the 100-year flood through it", {"return_period": 100.0}),
+        ("draw a reservoir and send the wave through it", {"inflow": "wave"}),
+        ("build a dam 25 m high with a 60 m wide spillway and route 300 m3/s through it",
+         {"top_m": 25.0, "width_m": 60.0, "peak_cms": 300.0}),
+    ]:
+        res = mc.parse_command(text, today="2026-10-27")
+        assert res["matched"], text
+        got = res["actions"][0]
+        assert got["type"] == "draw_reservoir" and {k: got[k] for k in want} == want, text
+    assert mc.validate_action({"type": "draw_reservoir", "crest_m": 20, "top_m": 15})[1].endswith("above its crest_m")
+    assert "3 to 200" in mc.validate_action({"type": "draw_reservoir", "polygon": [[1, 2], [2, 3]]})[1]
+    ok, why = mc.validate_action({"type": "draw_reservoir", "inflow": "wave", "return_period": 10})
+    assert why is None and "return_period" not in ok
+    assert mc.describe_action(mc.parse_command("draw a reservoir here")["actions"][0]) == \
+        ("A reservoir on the lake drawn on the map (crest 10 m, top 15 m, spillway 30 m wide), and route the "
+         "100-year flood through it")
+    assert "draw_reservoir" in mc.model_prompt()["system"]

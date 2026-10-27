@@ -34,7 +34,7 @@ import math
 from typing import Any
 
 __all__ = [
-    "CHECK", "METHOD", "NEH_17_2", "level_pool", "neh_check", "plan", "route_reservoir", "spillway",
+    "CHECK", "DEFAULTS", "METHOD", "NEH_17_2", "level_pool", "neh_check", "plan", "route_reservoir", "spillway",
     "stage_storage", "terrain_for",
 ]
 
@@ -79,6 +79,10 @@ CHECK = {
     "summary": ("Checked against NRCS NEH 630 Chapter 17, Example 17-2: its outflow table is reproduced within "
                 "0.51 ft3/s, the peak 364 ft3/s on day 5.3 as in the book."),
 }
+
+#: The dam when none is given (illustrative, for the reader to set): the spillway's crest 10 m above the lowest ground,
+#: the top of the dam 5 m above the crest, the spillway 30 m wide.
+DEFAULTS = {"crest_m": 10.0, "rise_m": 5.0, "width_m": 30.0}
 
 #: The terrain tiles (the Explorer reads the same ones for Flood it).
 TERRAIN_CREDIT = ("Terrain: Terrarium tiles (Mapzen/Tilezen joerd on AWS Open Data: SRTM, GMTED2010, ETOPO1, national "
@@ -320,7 +324,8 @@ def _series(q: Any) -> list[float]:
 
 def route_reservoir(polygon: Any, *, z: Any = None, window: dict[str, Any] | None = None,
                     dam: dict[str, Any] | None = None,
-                    crest_m: float, top_m: float | None = None, width_m: float = 30.0,
+                    crest_m: float = DEFAULTS["crest_m"], top_m: float | None = None,
+                    width_m: float = DEFAULTS["width_m"],
                     coefficient: float | None = None, return_period: float | None = None,
                     peak_cms: float | None = None, duration_h: float = 24.0, from_river_id: int | None = None,
                     storm: dict[str, Any] | None = None, hours: int | None = None,
@@ -358,7 +363,7 @@ def route_reservoir(polygon: Any, *, z: Any = None, window: dict[str, Any] | Non
 
         z = fs.terrain_window(window["x0"], window["y0"], window["nx"], window["ny"], window["zoom"])["z"]
     crest = float(crest_m)
-    top = crest + 5.0 if top_m is None else float(top_m)
+    top = crest + DEFAULTS["rise_m"] if top_m is None else float(top_m)
     if not (0 < crest < top):
         raise ValueError("the crest must be above the lowest ground (0 m) and below the top of the dam")
     # Tabulated a little above the top of the dam, so a flood that overtops it is still read off the terrain.
@@ -416,8 +421,25 @@ def route_reservoir(polygon: Any, *, z: Any = None, window: dict[str, Any] | Non
     t_in, t_out = int(np.argmax(q_in)), int(np.argmax(q_out))
     ref = [r for r in base.get("reaches") or [] if int(r["river_id"]) == dam_id]
     far = run.get("furthest") or {}
+    if storm is not None and run.get("outlets"):
+        # A storm has no single path: "furthest down" is the outlet the dam drains to.
+        from aquascope import rivers
+
+        net = rivers._network_for(dam_id)
+        outs = {int(r["river_id"]): r for r in run["outlets"]}
+        j, steps = dam_id, 0
+        while j not in outs and steps < 100_000:
+            i = net.index(j)
+            if i is None or int(net.ds[i]) < 0:
+                break
+            j, steps = int(net.ds[i]), steps + 1
+        out = outs.get(j)
+        far = {"river_id": out["river_id"], "peak_cms": out["peak_cms"]} if out else {}
+        base_rows = base.get("outlets") or []
+    else:
+        base_rows = base.get("reaches") or []
     far_id = int(far.get("river_id", -1)) if far else -1
-    far_base = next((r for r in base.get("reaches") or [] if int(r["river_id"]) == far_id),
+    far_base = next((r for r in base_rows if int(r["river_id"]) == far_id),
                     None)
     i_top = int(np.searchsorted(levels, bed + top))
     edge_top = float(curve["edge_below_pct"][min(i_top, len(levels) - 1)])

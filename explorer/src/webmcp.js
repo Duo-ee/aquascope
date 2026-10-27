@@ -125,6 +125,8 @@ const TOOLS = [
       + "(Floods past's flood there that month, assembled by aquascope.replay, #659). "
       + "draw_storm {rain_mm, duration_h, runoff_coefficient, polygon [[lon,lat],...] | bbox | place | area: drawn}: "
       + "rain on an area run off and routed down every river below (aquascope.routing.route_storm, #670). "
+      + "draw_reservoir {polygon | area: drawn, crest_m, top_m, width_m, return_period | peak_cms | inflow: wave}: a "
+      + "lake on a river and a flood routed through it, level-pool (aquascope.sketch.reservoir, #662). "
       + "Each is checked before it runs; place names are looked up in the gazetteer.",
     inputSchema: {
       type: "object",

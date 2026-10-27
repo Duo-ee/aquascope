@@ -5224,7 +5224,7 @@ def main() -> None:
     p_rr = route_sub.add_parser("reservoir", help="A flood through a reservoir drawn as a polygon on a river "
                                 "(level-pool routing), and on down the river; --check repeats NEH 630 Example 17-2")
     p_rr.add_argument("--polygon", default=None, help='The reservoir, a ring of [lon, lat] as JSON')
-    p_rr.add_argument("--crest", type=float, default=15.0, help="The spillway's crest, m above the lowest ground (15)")
+    p_rr.add_argument("--crest", type=float, default=10.0, help="The spillway's crest, m above the lowest ground (10)")
     p_rr.add_argument("--top", type=float, default=None, help="The top of the dam, m above the lowest ground "
                       "(the crest + 5)")
     p_rr.add_argument("--width", type=float, default=30.0, help="The spillway's width, m (30)")

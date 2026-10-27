@@ -1016,7 +1016,7 @@ def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 
     return res
 
 
-def route_reservoir(polygon: list[list[float]], crest_m: float = 15.0, top_m: float | None = None,
+def route_reservoir(polygon: list[list[float]], crest_m: float = 10.0, top_m: float | None = None,
                     width_m: float = 30.0, coefficient: float | None = None, return_period: float | None = None,
                     peak_cms: float | None = None, duration_h: float = 24.0, from_river_id: int | None = None,
                     storm_polygon: list[list[float]] | None = None, rain_mm: float | None = None,

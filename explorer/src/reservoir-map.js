@@ -237,6 +237,20 @@ function renderResult() {
 
 // ── run ─────────────────────────────────────────────────────────────────────
 
+// The lake and the river round it, beside the panel: the lake in the middle third of the view, so the wave leaving
+// the dam shows and the reader zooms out to follow it.
+function frameLake() {
+  const box = lake && ringBounds(lake.polygon);
+  if (!box || !state.mapOk || !map) return;
+  const [[w, s], [e, n]] = box;
+  const dx = Math.max(e - w, 0.02), dy = Math.max(n - s, 0.012);
+  const wide = [[w - dx, s - dy], [e + dx, n + dy]];
+  const p = panel(), phone = globalThis.matchMedia && matchMedia("(max-width: 640px)").matches;
+  const pad = { top: 90, left: 40, right: 40, bottom: 60 };
+  if (p && !p.hidden) { if (phone) pad.bottom = Math.min(p.offsetHeight + 24, map.getContainer().clientHeight * 0.5); else pad.right = p.offsetWidth + 40; }
+  try { map.fitBounds(wide, { padding: pad, maxZoom: 13, duration: 0 }); } catch { /* the map is not ready */ }
+}
+
 async function terrainFor(win) {
   const key = JSON.stringify([win.x0, win.y0, win.nx, win.ny, win.zoom]);
   if (!terrain.has(key)) {
@@ -268,7 +282,8 @@ async function run({ by = "rules", command = "", label = "" } = {}) {
     if (my !== running) return res;
     if (!res || !res.ok) throw new Error((res && res.error) || "no answer");
     showRouted(res, { river_id: lake.dam.river_id, lat: lake.dam.lat, lon: lake.dam.lon, reservoir: true, name: "Reservoir" },
-      { frame: true, label, by, command });
+      { frame: false, label, by, command });
+    frameLake();
     say(`Routed in ${Math.round((performance.now() - started) / 1000)} s. The wave plays on the time bar; drag a corner to move the lake.`, "ok");
     announce(reservoirHeadline(res));
     return res;
@@ -343,7 +358,7 @@ export function initReservoir() {
     icon: ICON, run: () => openReservoir() });
   actions.drawReservoir = drawReservoir;
   globalThis.__aq = globalThis.__aq || {};
-  globalThis.__aq.reservoir = { open: openReservoir, run, lake: () => lake, wave: () => wave, other: () => other,
+  globalThis.__aq.reservoir = { open: openReservoir, run, frame: frameLake, lake: () => lake, wave: () => wave, other: () => other,
     drawReservoir };
   syncOutputs();
 }

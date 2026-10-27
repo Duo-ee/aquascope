@@ -67,7 +67,7 @@ export function waveWords(wave) {
   if (!f) return "";
   if (f.storm) return `the storm on the map (${Number(f.storm.rain_mm)} mm in ${hoursWords(f.storm.duration_h)})`;
   const what = finite(f.return_period) ? `the ${f.return_period}-year flood` : `${flowWords(f.peak_cms)} m³/s`;
-  return `${what} routed on the map, from reach ${f.from_river_id}`;
+  return finite(f.from_river_id) ? `${what} routed on the map, from reach ${f.from_river_id}` : `${what} at the dam, as before`;
 }
 
 /** The lake and the dam on the map. */
