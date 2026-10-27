@@ -53,6 +53,7 @@ ACTION_TYPES = (
     "paint",
     "flood_reach",
     "draw_levee", "draw_breach",
+    "replay",
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
@@ -68,6 +69,8 @@ FLOOD_RETURN_PERIODS = (2.0, 500.0)
 #: above mean sea level, a freeboard above the highest flood along the line in m.
 SKETCH_LIMITS = {"points": 200, "level_m": (-100.0, 9000.0), "freeboard_m": (0.0, 20.0)}
 SKETCHES = ("draw_levee", "draw_breach")
+#: Replay an event (#659): which of Floods past's floods near the place a replay action may pick (by rank).
+REPLAY_PICKS = (1, 5)
 DIRECTIONS = ("upstream", "downstream", "both")
 STEPS = ("day", "week", "month")
 STATUS_IDS = tuple(c["id"] for c in STATUS_CLASSES)
@@ -354,6 +357,11 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
+                        "month": {"type": "string",
+                                  "description": "replay: the month of the flood, YYYY-MM, not after today"},
+                        "pick": {"type": "integer", "minimum": REPLAY_PICKS[0], "maximum": REPLAY_PICKS[1],
+                                 "description": "replay: which of the floods the code lists there (1: the most "
+                                                "reported)"},
                         "question": {"type": "string", "enum": list(PAINT_QUESTIONS),
                                      "description": "paint: the question to answer at every gauge"},
                         "min_years": {"type": "integer", "minimum": PAINT_MIN_YEARS[0],
@@ -628,6 +636,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
         return _validate_flood(action, out, place)
     if kind in SKETCHES:
         return _validate_sketch(action, out)
+    if kind == "replay":
+        return _validate_replay(action, out, place, t)
     if kind == "paint":
         if action.get("question") not in PAINT_QUESTIONS:
             return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
@@ -758,6 +768,37 @@ def _validate_flood(action: dict[str, Any], out: dict[str, Any], place: str | No
         out["return_period"] = float(rp)
     if "flow_cms" not in out and flow is None and "return_period" not in out:
         out["return_period"] = FLOOD_DEFAULT_RP
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
+def _validate_replay(action: dict[str, Any], out: dict[str, Any], place: str | None, t: date
+                     ) -> tuple[dict[str, Any] | None, str | None]:
+    """Replay an event (#659): where (a place, a point, or ``at: here``, the river selected on the map) and when (a
+    ``month``, YYYY-MM). The code lists Floods past's floods there that month (:func:`aquascope.replay.candidates`)
+    and takes the ``pick``-th (the most reported by default); the model never writes the story or a number."""
+    point = _latlon(action.get("lat"), action.get("lon"))
+    if point:
+        out["lat"], out["lon"] = point
+    elif place:
+        out["place"] = place
+    elif action.get("at") in ("here", "center"):
+        out["at"] = "here"
+    else:
+        return None, "replay needs a place, a lat and lon, or at: here (the river selected on the map)"
+    month = str(action.get("month") or "")[:7]
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        return None, "replay needs a month, YYYY-MM"
+    if not (date(2000, 1, 1) <= date(int(month[:4]), int(month[5:7]), 1) <= t):
+        return None, "replay's month must be from January 2000 (where Floods past starts) to this month"
+    out["month"] = month
+    pick = action.get("pick")
+    if pick is not None:
+        if not _finite(pick) or not REPLAY_PICKS[0] <= int(pick) <= REPLAY_PICKS[1]:
+            return None, f"replay's pick must be {REPLAY_PICKS[0]} to {REPLAY_PICKS[1]}"
+        out["pick"] = int(pick)
     label = _text(action.get("label"), 80)
     if label:
         out["label"] = label
@@ -915,6 +956,11 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             top = f", down to {float(a['invert']):g} m" if a.get("invert") is not None else ""
         return f"Draw {what} {where}{top}, and flood again"
+    if kind == "replay":
+        where = a.get("label") or a.get("place") or ("the selected river" if a.get("at") == "here" else
+                                                     f"{a.get('lat'):.2f}, {a.get('lon'):.2f}")
+        pick = f" (flood {a['pick']} there)" if a.get("pick", 1) != 1 else ""
+        return f"Replay the flood of {_month_words(a['month'] + '-01')} at {where}{pick}"
     if kind == "paint":
         where = a.get("label") or a.get("place") or ("the box" if a.get("bbox") else "this view")
         return f"Paint {where}: {PAINT_QUESTIONS[a['question']]['label']}"
@@ -1242,6 +1288,35 @@ def _flood_phrase(c: _Clause) -> None:
     c.add("flood_reach", action)
 
 
+def _replay_phrase(c: _Clause) -> None:
+    """Replay an event (#659): "replay the Severn flood of November 2024", "replay the flood of September 2024 at
+    Asheville", "replay the November 2024 flood here", "replay the floods of Nov 2024 on the Severn"."""
+    m = re.search(r"^(?:replay|re-play|tell|show)\s+(?:me\s+)?(?:the\s+|a\s+)?(?P<pre>.*?)\s*floods?\b\s*(?P<tail>.*)$",
+                  c.text)
+    if not m or not re.match(r"^(?:replay|re-play)", c.text):
+        return
+    words = f"{m.group('pre')} {m.group('tail')}".strip()
+    when = re.search(r"(?:\b(?:of|in|from)\s+)?" + _MONTH_RE + r"\s+(?P<y>(?:19|20)\d{2})\b", words)
+    if not when:
+        when = re.search(r"(?:\b(?:of|in|from)\s+)?(?P<y>(?:19|20)\d{2})-(?P<m>0[1-9]|1[0-2])\b", words)
+        if not when:
+            return
+        month = f"{when.group('y')}-{when.group('m')}"
+    else:
+        month = f"{when.group('y')}-{MONTHS[when.group('mon')]:02d}"
+    rest = (words[: when.start()] + " " + words[when.end():]).strip()
+    rest = re.sub(r"^(?:on|at|in|of|along|near|for)\s+", "", re.sub(r"\s+", " ", rest)).strip()
+    rest = re.sub(r"\s+(?:on|at|in|of|along|near)$", "", rest).strip()
+    rest = re.sub(r"^(?:the\s+)?(?:river\s+)?", "", rest) if rest.startswith(("the river ", "river ")) else rest
+    action: dict[str, Any] = {"type": "replay", "month": month}
+    if not rest or rest in ("here", "this river", "this reach", "the selected river", "the river", "it", "this"):
+        action["at"] = "here"
+    else:
+        action["place"] = _place_text(_raw_span(c, re.sub(r"^the\s+", "", rest)))
+    c.text = ""
+    c.add("replay", action)
+
+
 def _sketch_phrase(c: _Clause) -> None:
     """Levees and breaches (#663): "draw a levee", "draw a levee from Upton upon Severn to Hanley Castle at 14 m",
     "build a flood wall 1 m above the flood", "draw a breach", "breach the levee". The line is drawn on the map
@@ -1467,6 +1542,7 @@ def _place_phrase(c: _Clause) -> None:
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
                                       "highlight_river", "route", "flood_reach", "draw_levee", "draw_breach",
+                                      "replay",
                                       "add_pin", "paint"))}
 
 
@@ -1475,8 +1551,8 @@ def _parse_clause(raw: str, today: date) -> _Clause:
     c.text = re.sub(r"^(?:please|hey|ok|okay|now|can you|could you|would you|i want to|i'd like to|let me|let's)\s+",
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
-    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _sketch_phrase, _area_phrase,
-                 _flood_phrase, _route_phrase, _river_phrase):
+    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _replay_phrase, _sketch_phrase,
+                 _area_phrase, _flood_phrase, _route_phrase, _river_phrase):
         step(c)
         if c.actions:
             return c
@@ -1772,7 +1848,8 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
         if not a.get("place"):
             out.append({k: v for k, v in a.items() if k != "river"})
             continue
-        want = "river" if a.get("river") or a["type"] in ("highlight_river", "route", "flood_reach") else "any"
+        want = "river" if a.get("river") or a["type"] in ("highlight_river", "route", "flood_reach", "replay") \
+            else "any"
         # "the Nile at Khartoum": the river, found where the second place is.
         river_at = re.match(r"^(?P<river>.+?)\s+(?:at|near|by|in)\s+(?P<where>.+)$", a["place"]) \
             if want == "river" else None
@@ -1809,7 +1886,7 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 notes.append(f"{a['place']} has no position to start the river from")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
-        elif a["type"] in ("route", "flood_reach"):
+        elif a["type"] in ("route", "flood_reach", "replay"):
             if hit.get("lat") is None:
                 notes.append(f"{a['place']} has no position to start the flood from")
                 continue
@@ -1928,6 +2005,10 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         'above the highest flood along the line (0.5 when none is said). The map computes the levee and the flood.',
         '- draw_breach: a gap in a levee, then flood again. "line" as for draw_levee; "invert" only when the reader '
         'gave the gap\'s floor level.',
+        '- replay: replay a past flood as a story on the map (the rain, the gauge against the model, what the '
+        'forecast said, the wave downstream, a screening flood). "place" (a river or a town; or "lat" and "lon", or '
+        '"at": "here") and "month" (YYYY-MM). The map lists the floods it has there that month and takes the most '
+        'reported; "pick" (2 to 5) only when the reader asked for another. The map writes the story and every number.',
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "

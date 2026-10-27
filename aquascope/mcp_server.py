@@ -952,6 +952,55 @@ def flood_reach(river_id: int | None = None, lat: float | None = None, lon: floa
     return s
 
 
+def replay_candidates(lat: float, lon: float, month: str | None = None, start: str | None = None,
+                      end: str | None = None, radius_km: float = 40.0) -> dict[str, Any]:
+    """Replay an event (#659), step one: the floods Floods past has near a point (lat, lon) in a month (YYYY-MM) or
+    from start to end: its news reports within radius_km grouped into runs of days, the most reported first, each
+    with a rank, its dates, its number of reports and its centre. Pick one by rank for replay_event."""
+    from aquascope.replay import candidates
+
+    return candidates(lat, lon, month=month, start=start, end=end, radius_km=radius_km)
+
+
+def replay_event(river_id: int | None = None, lat: float | None = None, lon: float | None = None,
+                 start: str | None = None, end: str | None = None, month: str | None = None, pick: int = 1,
+                 flood: bool = False, out_dir: str | None = None) -> dict[str, Any]:
+    """Replay an event (#659): a past flood assembled from its data and told as a story. Give river_id (or lat/lon:
+    the largest river within 12 km) and start (and end), or lat/lon and month to take Floods past's flood number pick
+    there (replay_candidates lists them). Returns the story: ordered stops, each with a camera, a date, the layers
+    and a note written by code from the data (IMERG rain over the upstream basin; the gauges against GEOGLOWS's
+    retrospective; what GEOGLOWS's forecast said 1, 3 and 7 days before the peak, from its archive since July 2024;
+    the wave routed downstream with Route it), plus each piece's source, licence and coverage, and the Markdown
+    report. flood runs Flood it at the peak flow and counts what is under it (a few minutes). out_dir writes the
+    record, the story and the report. Numbers from code; a piece the data does not cover says so."""
+    import json as _json
+    from pathlib import Path
+
+    from aquascope import replay
+
+    event = None
+    if month and not start:
+        if lat is None or lon is None:
+            return {"error": "month needs lat and lon (where to look in Floods past)"}
+        c = replay.candidates(lat, lon, month=month)
+        if not c["candidates"]:
+            return {"error": c["note"]}
+        event = c["candidates"][max(1, min(int(pick), len(c["candidates"]))) - 1]
+    rec = replay.event_record(river_id, lat=lat, lon=lon, start=start, end=end, event=event, with_flood=flood)
+    st = replay.story(rec)
+    md = replay.report(rec, st)
+    out: dict[str, Any] = {"story": st, "report": md}
+    if out_dir:
+        folder = Path(out_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = f"replay-{rec['peak'].get('river_id')}-{rec['peak'].get('date')}"
+        (folder / f"{stem}-record.json").write_text(_json.dumps(rec, default=str))
+        (folder / f"{stem}-story.json").write_text(_json.dumps(st, default=str))
+        (folder / f"{stem}.md").write_text(md)
+        out["files"] = [str(folder / f"{stem}{x}") for x in ("-record.json", "-story.json", ".md")]
+    return out
+
+
 def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None) -> dict[str, Any]:
     """Route it (#656): a storm over polygon (a ring of [lon, lat]) of rain_mm over duration_h hours, a plain
@@ -1760,6 +1809,8 @@ def build_server():
     server.tool()(route_flood)
     server.tool()(route_storm)
     server.tool()(flood_reach)
+    server.tool()(replay_candidates)
+    server.tool()(replay_event)
     server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)

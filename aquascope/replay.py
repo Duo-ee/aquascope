@@ -74,7 +74,7 @@ GAUGE_KM = 30.0
 STEM_REACHES = 80
 MAX_GAUGES = 3
 #: How far from a news event's centre its river is looked for.
-EVENT_RADIUS_M = 8000.0
+EVENT_RADIUS_M = 12000.0
 #: The upstream basin goes to ClimateSERV as cells of this size (degrees), coarser when it would be too many.
 RAIN_CELL_DEG = (0.1, 0.25, 0.5, 1.0)
 MAX_RAIN_PARTS = 120
@@ -1074,8 +1074,8 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
             note += (f" GEOGLOWS simulated {_q(mp['cms'])} on {_day(mp['date'])}: "
                      f"{_signed(g['peak_error_pct'], '%')}, {_days_words(g['timing_days'])}.")
         rp = (pc.get("model") or {}).get("return_period")
-        if rp:
-            note += f" On GEOGLOWS's own record that is a {rp:,.0f}-year flow."
+        if rp and mp:
+            note += f" GEOGLOWS's peak is a {rp:,.0f}-year flow on its own record since 1940."
         more = [x for x in gauges_p["gauges"][1:] if x.get("obs_peak")]
         stop("gauge", "gauge", "The gauge against the model", near, op["date"], ["rivers"], note,
              focus={"lon": g["lon"], "lat": g["lat"]},

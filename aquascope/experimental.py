@@ -18,6 +18,8 @@ What is here and why (``docs/stability.md`` has the full policy):
 * Paint the globe (#657, after 1.0.0): ``aquascope.paint``, ``aquascope paint`` and the MCP tool ``paint_map``.
 * Flood it (#658): ``aquascope.floodsim`` (a local-inertial screening flood of a river's valley), ``aquascope flood``
   and the MCP tool ``flood_reach``, new in 1.1.
+* Replay an event (#659): ``aquascope.replay`` (a past flood assembled from its data and told as a story),
+  ``aquascope replay`` and the MCP tools ``replay_candidates`` and ``replay_event``, new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -58,6 +60,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.mesh_views",
     "aquascope.nownext",
     "aquascope.paint",
+    "aquascope.replay",
     "aquascope.river_path",
     "aquascope.rivers",
     "aquascope.routing",
@@ -87,6 +90,7 @@ CLI: tuple[str, ...] = (
     "modflow",
     "now",
     "paint",
+    "replay",
     "river",
     "route",
     "swmm",
@@ -130,6 +134,8 @@ MCP_TOOLS: tuple[str, ...] = (
     "paint_map",
     "place_context",
     "reach_record",
+    "replay_candidates",
+    "replay_event",
     "river_status_month",
     "river_status_summary",
     "route_flood",
