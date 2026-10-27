@@ -493,9 +493,29 @@ async function onCellClick(e) {
   }
   if (my !== popupRun || !popup) return;
   popup.setHTML(cellCard(p, months, eventsHtml(res, months) +
-    '<button class="btn tiny fp-open" type="button">Open this place</button>'));
+    '<div class="fp-rp-slot"></div><button class="btn tiny fp-open" type="button">Open this place</button>'));
   const btn = popup.getElement() && popup.getElement().querySelector(".fp-open");
   if (btn) btn.addEventListener("click", () => { closePopup(); actions.selectPoint(coords[1], coords[0], { fly: false }); });
+  void offerReplay(my, coords, months, res);
+}
+
+// Replay an event (#659): the floods the cell's news reports make, as Replay buttons (the package groups the reports
+// into runs of days, aquascope.replay.candidates). Only where the news has events and a replay is on the page.
+async function offerReplay(my, coords, months, res) {
+  if (!actions.replayCandidates || !res || res.error || !((res.news || {}).events || []).length) return;
+  let got;
+  try {
+    got = await actions.replayCandidates({ lat: coords[1], lon: coords[0], start: months[0], end: months[months.length - 1] });
+  } catch { return; }
+  if (my !== popupRun || !popup || !got || !got.list.length) return;
+  const slot = popup.getElement() && popup.getElement().querySelector(".fp-rp-slot");
+  if (!slot) return;
+  slot.innerHTML = got.html;
+  slot.querySelectorAll(".fp-rp").forEach((b) => b.addEventListener("click", () => {
+    const c = got.list[Number(b.dataset.k)];
+    closePopup();
+    actions.startReplay({ event: c, lat: c.lat, lon: c.lon, start: c.start, end: c.end, reports: c.reports });
+  }));
 }
 
 // ── boot ────────────────────────────────────────────────────────────────────

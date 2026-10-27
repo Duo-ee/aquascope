@@ -364,16 +364,20 @@ def gauges(river_id: int, a: date, b: date, *, lat: float | None = None, lon: fl
     tried = 0
     for _d, r in near[:16]:
         tried += 1
+        extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
+        area = _num(extra.get("catchment_area_km2"), 1)
         try:
-            snap = rivers.snap_to_river(float(r["latitude"]), float(r["longitude"]), max_distance_m=1000.0)
+            # A gauge's catchment area picks its river where a tributary joins beside it (the catalogue's area).
+            snap = rivers.snap_to_river(float(r["latitude"]), float(r["longitude"]), max_distance_m=1000.0,
+                                        area_km2=area if area and area > 0 else None)
         except Exception as exc:  # noqa: BLE001 - one gauge that cannot be placed does not stop the others
             logger.info("snap failed for %s: %s", r.get("station_id"), exc)
             continue
         if not snap.get("snapped") or int(snap["river_id"]) not in stem:
             continue
         found.append({"r": r, "river_id": int(snap["river_id"]), "steps": stem[int(snap["river_id"])]})
-    found.sort(key=lambda g: abs(g["steps"]))
     out = []
+    found.sort(key=lambda g: abs(g["steps"]))
     for g in found:
         if len(out) >= max_gauges:
             break
@@ -383,12 +387,13 @@ def gauges(river_id: int, a: date, b: date, *, lat: float | None = None, lon: fl
         except Exception as exc:  # noqa: BLE001 - a gauge whose record cannot be read is skipped, and said
             logger.info("record unavailable for %s: %s", r.get("station_id"), exc)
             continue
-        if len(obs) < 3:
+        if len(obs) < 3 or max(v for _, v in obs) <= 0:
             continue
         sim = _retro(g["river_id"], a, b)
         po, ps = _peak(obs), _peak(sim)
         row: dict[str, Any] = {
             "source": r["source"], "station_id": str(r["station_id"]), "name": r.get("name") or str(r["station_id"]),
+            "river": r.get("river") or None,
             "lat": float(r["latitude"]), "lon": float(r["longitude"]), "river_id": g["river_id"],
             "reaches_from_event": g["steps"], "observed": [[d, round(v, 3)] for d, v in obs],
             "modelled": [[d, round(v, 3)] for d, v in sim], "record_note": note,
@@ -402,6 +407,8 @@ def gauges(river_id: int, a: date, b: date, *, lat: float | None = None, lon: fl
             row["peak_error_pct"] = round(100.0 * (ps[1] - po[1]) / po[1], 1) if po[1] > 0 else None
             row["timing_days"] = (_date(ps[0]) - _date(po[0])).days
         out.append(row)
+    # Nearest along the river first; of two as near, the one with the bigger flood (the main river's).
+    out.sort(key=lambda x: (abs(x["reaches_from_event"]), -float((x.get("obs_peak") or {}).get("cms") or 0.0)))
     if not out:
         return _missing("gauges", (f"No discharge gauge with a record from {_day(a)} to {_day(b)} on this river "
                                    f"within {gauge_km:g} km (checked {tried} of the catalogue's gauges nearby)."),
@@ -766,7 +773,8 @@ def wave(river_id: int, rows: list[Any], *, source: str, peak_date: Any, lat: fl
     return {
         "available": True, "piece": "wave", "river_id": int(river_id), "start": t0.isoformat(),
         "inflow_source": source, "inflow_peak_cms": res["inflow"]["peak_cms"], "hours": res["hours"],
-        "places": stops, "furthest": res.get("furthest"), "n_reaches": res.get("n_reaches"),
+        "places": stops, "route_places": res.get("places"), "inflow": res.get("inflow"),
+        "furthest": res.get("furthest"), "n_reaches": res.get("n_reaches"),
         "geometry": res.get("geometry"), "frames": res.get("frames"), "reaches": res.get("reaches"),
         "source": "Route it: Muskingum routing on GEOGLOWS v2's own network (aquascope.routing)",
         "licence": LICENCES["routing"], "coverage": "every river GEOGLOWS v2 models",
@@ -1141,7 +1149,7 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
              fill=None if fill else {"flow": _q(flood_p.get("flow_cms")), "flow_source": flood_p.get("flow_source")},
              run={"river_id": flood_p.get("river_id"), "flow_cms": flood_p.get("flow_cms"), "lat": f["lat"],
                   "lon": f["lon"]})
-        ex = (fr or {}).get("exposure") if fr is flood_p else fr
+        ex = (fr or {}).get("exposure")
         efill = _expo_fill(ex) if ex else None
         stop("exposure", "exposure", "What was under the water", {**fl_cam, "zoom": 12.9, "bearing": 40},
              peak.get("date"), ["floodsim", "exposure"],

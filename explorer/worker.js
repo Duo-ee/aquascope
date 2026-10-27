@@ -1878,6 +1878,50 @@ _fs_out = json.dumps(_out, default=str)
   self.postMessage({ type: "result", id, result }, transfer);
 }
 
+// ── Replay an event (#659): aquascope.replay, the same functions as `aquascope replay` and the MCP tools
+// replay_candidates and replay_event. Type "replay" (the main worker: the gauges need pandas, the forecast archive
+// numcodecs): op "candidates" lists Floods past's floods near a point in a month; op "record" assembles the event
+// without the flood (the page runs Flood it on the GPU) and leaves the rain as a ClimateSERV request; op "rain"
+// looks at that request once (the page asks again every few seconds); op "story" writes the story and the report,
+// with the page's own flood and exposure numbers when it has them.
+let replayReady = null;
+async function replayOp({ id, op, args }) {
+  if (!replayReady) replayReady = pyodide.loadPackage(["numcodecs"]).catch(() => null);
+  await replayReady;
+  pyodide.globals.set("_rp_args", JSON.stringify({ op: String(op || "record"), args: args || {} }));
+  pyodide.globals.set("_rp_say", (text) => post("replay_progress", { id, text: String(text) }));
+  const code = `
+import json
+from aquascope import replay as _rp
+_a = json.loads(_rp_args)
+_k = dict(_a["args"])
+try:
+    if _a["op"] == "candidates":
+        _out = _rp.candidates(float(_k["lat"]), float(_k["lon"]), month=_k.get("month"), start=_k.get("start"),
+                              end=_k.get("end"), radius_km=float(_k.get("radius_km") or 40))
+    elif _a["op"] == "record":
+        _out = _rp.event_record(_k.get("river_id"), lat=_k.get("lat"), lon=_k.get("lon"), start=_k.get("start"),
+                                end=_k.get("end"), event=_k.get("event"), places=_k.get("places"),
+                                with_flood=False, rain_wait=False, progress=_rp_say)
+    elif _a["op"] == "rain":
+        _out = _rp.rain_poll(_k["piece"])
+    elif _a["op"] == "story":
+        _st = _rp.story(_k["record"], flood_result=_k.get("flood"))
+        _out = {"story": _st, "report": _rp.report(_k["record"], _st, flood_result=_k.get("flood"))}
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, RuntimeError, LookupError, TypeError, KeyError, OSError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+json.dumps(_out, default=str)
+`;
+  try {
+    const out = await pyodide.runPythonAsync(code);
+    post("result", { id, result: JSON.parse(out) });
+  } finally {
+    pyodide.globals.set("_rp_say", null);
+  }
+}
+
 self.onmessage = async (e) => {
   const m = e.data;
   try {
@@ -1918,6 +1962,7 @@ self.onmessage = async (e) => {
     if (m.type === "whatif" || m.type === "whatif_words") return await whatIf(m);
     if (m.type === "route") return await routeOp(m);
     if (m.type === "floodsim") return await floodsimOp(m);
+    if (m.type === "replay") return await replayOp(m);
     if (m.type === "groundwater") return await groundwater(m);
     if (m.type === "gw_layers") return await gwLayers(m);
   } catch (err) {
