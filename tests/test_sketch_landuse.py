@@ -157,7 +157,7 @@ def test_soil_groups_from_the_cog(monkeypatch):
 
 
 def test_explorer_lists_match_the_package():
-    core = (ROOT / "explorer" / "src" / "landuse-core.js").read_text()
+    core = (ROOT / "explorer" / "src" / "landuse-core.js").read_text(encoding="utf-8")
     for key in lu.USES:
         if key in lu.TR55:
             assert f'["{key}", "{lu.TR55[key]["label"]}"]' in core, key
