@@ -533,6 +533,255 @@ def _orient(z: np.ndarray, cells: list[tuple[int, int]]) -> list[tuple[int, int]
     return cells
 
 
+# ── levees and breaches (#663) ──────────────────────────────────────────────
+
+#: The broad-crested weir coefficient in SI units for critical depth over the crest: ``Q = C b H^1.5`` with
+#: ``C = (2/3)^(3/2) g^(1/2)`` (about 1.705 m^0.5/s), the ideal weir of the open-channel texts (Henderson 1966,
+#: *Open Channel Flow*).
+WEIR_C = (2.0 / 3.0) ** 1.5 * math.sqrt(G)
+#: The freeboard (m) a suggested crest keeps above the highest water along a drawn line.
+FREEBOARD_M = 0.5
+
+
+def _cell_xy(win: dict[str, Any], line: Any) -> list[tuple[float, float]]:
+    """A (lon, lat) polyline in the window's cell coordinates: x along the columns, y down the rows."""
+    pts = []
+    for p in line:
+        lon, lat = float(p[0]), float(p[1])
+        if not (math.isfinite(lon) and math.isfinite(lat)) or abs(lat) >= 85.06:
+            raise ValueError("a line's points must be finite longitudes and latitudes inside Web Mercator")
+        x, y = _world_px(lon, lat, win["zoom"])
+        pts.append((x - win["x0"], y - win["y0"]))
+    if len(pts) < 2:
+        raise ValueError("a line needs at least two points")
+    return pts
+
+
+def _supercover(ax: float, ay: float, bx: float, by: float) -> list[tuple[int, int]]:
+    """Every cell (row, col) the segment from (ax, ay) to (bx, by) touches, in order: Amanatides and Woo's (1987)
+    traversal, taking both side cells where the segment passes exactly through a cell corner."""
+    c, r = math.floor(ax), math.floor(ay)
+    c1, r1 = math.floor(bx), math.floor(by)
+    dx, dy = bx - ax, by - ay
+    sx = 1 if dx > 0 else -1
+    sy = 1 if dy > 0 else -1
+    tx = ((c + (sx > 0)) - ax) / dx if dx else math.inf
+    ty = ((r + (sy > 0)) - ay) / dy if dy else math.inf
+    ddx = abs(1.0 / dx) if dx else math.inf
+    ddy = abs(1.0 / dy) if dy else math.inf
+    out = [(r, c)]
+    for _ in range(abs(c1 - c) + abs(r1 - r) + 2):
+        if (r, c) == (r1, c1) or min(tx, ty) > 1.0:
+            break
+        if abs(tx - ty) < 1e-12:
+            out += [(r, c + sx), (r + sy, c)]
+            c, r, tx, ty = c + sx, r + sy, tx + ddx, ty + ddy
+        elif tx < ty:
+            c, tx = c + sx, tx + ddx
+        else:
+            r, ty = r + sy, ty + ddy
+        out.append((r, c))
+    return out
+
+
+def supercover_cells(grid: dict[str, Any], line: Any) -> list[tuple[int, int]]:
+    """Every grid cell a (lon, lat) polyline touches, in order along it and without repeats: a supercover
+    rasterisation, so consecutive cells share a face and a line of raised cells has no gap at a corner that water
+    could leak through. ``grid`` is a :func:`prepare_grid` answer or a :func:`window`. Cells off the grid are left
+    out."""
+    win = grid.get("window", grid)
+    pts = _cell_xy(win, line)
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[int, int]] = []
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        for rc in _supercover(ax, ay, bx, by):
+            if rc not in seen and 0 <= rc[0] < win["ny"] and 0 <= rc[1] < win["nx"]:
+                seen.add(rc)
+                out.append(rc)
+    return out
+
+
+def _natural(grid: dict[str, Any]) -> dict[str, np.ndarray]:
+    nat = grid.get("natural")
+    return nat if nat else {"z": np.asarray(grid["z"], dtype="f8"), "z_burnt": np.asarray(grid["z_burnt"], dtype="f8")}
+
+
+def _line_m(win: dict[str, Any], line: Any) -> float:
+    pts = [(float(p[0]), float(p[1])) for p in line]
+    return sum(_haversine_km(a[1], a[0], b[1], b[0]) for a, b in zip(pts, pts[1:])) * 1000.0
+
+
+def apply_levee(grid: dict[str, Any], line: Any, crest: float) -> dict[str, Any]:
+    """A levee along ``line`` (a list of [lon, lat]): every cell the line crosses (:func:`supercover_cells`) is
+    raised to ``crest``.
+
+    ``crest`` is an **elevation** in metres on the terrain's own datum (the Terrarium tiles: metres above mean sea
+    level), not a height above the ground: a levee's crest is level along it while the ground under it is not. A
+    cell already higher than the crest is left as it is. A levee drawn across a river dams it: the cells of a burnt
+    channel under the line are raised too, and counted in ``channel_cells``.
+
+    Returns the new terrain the run floods (``terrain``, the grid's ``z_burnt`` with the levee), the new terrain
+    the map and the depths are drawn from (``ground``), the edited cells (``cells``, [row, col] in order along the
+    line) and what changed. The grid itself is not changed; the same line and crest always give the same cells."""
+    crest = float(crest)
+    if not math.isfinite(crest):
+        raise ValueError("a levee's crest must be a number (m above mean sea level)")
+    zb = np.array(grid["z_burnt"], dtype="f8")
+    zg = np.array(grid["z"], dtype="f8")
+    cells = supercover_cells(grid, line)
+    if not cells:
+        raise ValueError("the levee's line does not cross the grid")
+    rr = np.array([r for r, _ in cells], dtype=np.intp)
+    cc = np.array([c for _, c in cells], dtype=np.intp)
+    under = zg[rr, cc].copy()
+    channel = int(np.count_nonzero(zb[rr, cc] < zg[rr, cc] - 1e-9))
+    raised = zb[rr, cc] < crest
+    zb[rr, cc] = np.maximum(zb[rr, cc], crest)
+    zg[rr, cc] = np.maximum(zg[rr, cc], crest)
+    return {"kind": "levee", "terrain": zb, "ground": zg, "cells": [[int(r), int(c)] for r, c in cells],
+            "crest_m": round(crest, 3), "raised": int(raised.sum()), "channel_cells": channel,
+            "ground_m": [round(float(under.min()), 2), round(float(under.max()), 2)],
+            "height_m": [round(float(max(crest - under.max(), 0.0)), 2),
+                         round(float(max(crest - under.min(), 0.0)), 2)],
+            "length_m": round(_line_m(grid.get("window", grid), line), 1)}
+
+
+def apply_breach(grid: dict[str, Any], line: Any, invert: float | None = None) -> dict[str, Any]:
+    """A breach along ``line``: every cell the line crosses (:func:`supercover_cells`) is lowered to ``invert``,
+    an elevation in metres on the terrain's datum, as a levee's crest. A cell already lower is left as it is.
+    Without an ``invert`` each cell goes back to its natural ground (the grid's terrain before any levee: a gap in
+    a drawn levee). Draw a breach along the levee over the stretch that fails; its width is the cells it crosses.
+
+    Returns ``terrain``, ``ground`` and ``cells`` as :func:`apply_levee` does, the cells lowered and the gap's
+    width along the line."""
+    zb = np.array(grid["z_burnt"], dtype="f8")
+    zg = np.array(grid["z"], dtype="f8")
+    nat = _natural(grid)
+    cells = supercover_cells(grid, line)
+    if not cells:
+        raise ValueError("the breach's line does not cross the grid")
+    rr = np.array([r for r, _ in cells], dtype=np.intp)
+    cc = np.array([c for _, c in cells], dtype=np.intp)
+    if invert is None:
+        tb, tg = nat["z_burnt"][rr, cc], nat["z"][rr, cc]
+    else:
+        if not math.isfinite(float(invert)):
+            raise ValueError("a breach's invert must be a number (m above mean sea level)")
+        tb = tg = np.full(rr.size, float(invert))
+    lowered = zb[rr, cc] > tb + 1e-9
+    zb[rr, cc] = np.minimum(zb[rr, cc], tb)
+    zg[rr, cc] = np.minimum(zg[rr, cc], tg)
+    return {"kind": "breach", "terrain": zb, "ground": zg, "cells": [[int(r), int(c)] for r, c in cells],
+            "invert_m": None if invert is None else round(float(invert), 3), "lowered": int(lowered.sum()),
+            "floor_m": [round(float(zg[rr, cc].min()), 2), round(float(zg[rr, cc].max()), 2)],
+            "length_m": round(_line_m(grid.get("window", grid), line), 1)}
+
+
+def read_line(geo: Any) -> list[list[list[float]]]:
+    """Lines from GeoJSON (a LineString, a MultiLineString, a Feature or a FeatureCollection of them, as a dict or
+    text) or a plain list of [lon, lat]: a list of lines, each a list of [lon, lat]."""
+    import json
+
+    if isinstance(geo, (str, bytes)):
+        geo = json.loads(geo)
+    if isinstance(geo, list):
+        if geo and isinstance(geo[0], (list, tuple)) and geo[0] and isinstance(geo[0][0], (int, float)):
+            return [[[float(p[0]), float(p[1])] for p in geo]]
+        return [ln for part in geo for ln in read_line(part)]
+    if not isinstance(geo, dict):
+        raise ValueError("a line must be GeoJSON or a list of [lon, lat]")
+    kind = geo.get("type")
+    if kind == "FeatureCollection":
+        return [ln for f in geo.get("features") or [] for ln in read_line(f)]
+    if kind == "Feature":
+        return read_line(geo.get("geometry") or {})
+    if kind == "LineString":
+        return [[[float(p[0]), float(p[1])] for p in geo["coordinates"]]]
+    if kind == "MultiLineString":
+        return [[[float(p[0]), float(p[1])] for p in ln] for ln in geo["coordinates"]]
+    raise ValueError(f"a levee or a breach is a line, not a {kind}")
+
+
+def edit_grid(grid: dict[str, Any], edits: list[dict[str, Any]]) -> dict[str, Any]:
+    """A :func:`prepare_grid` answer with levees and breaches applied in the order given: each edit is
+    ``{"kind": "levee", "line": [[lon, lat], ...], "crest": m}`` or ``{"kind": "breach", "line": [...],
+    "invert": m}`` (the invert may be left out: the natural ground). The answer is a new grid (the arrays copied,
+    the input unchanged) with ``natural`` (the terrain before any edit) and ``edits`` (each edit's cells and
+    numbers). The same edits always give the same grid."""
+    nat = _natural(grid)
+    g = {**grid, "natural": nat, "z": np.array(nat["z"]), "z_burnt": np.array(nat["z_burnt"]), "edits": []}
+    for k, e in enumerate(edits or []):
+        kind = e.get("kind")
+        if kind == "levee":
+            if e.get("crest") is None:
+                raise ValueError(f"edit {k + 1}: a levee needs a crest (m above mean sea level)")
+            out = apply_levee(g, e["line"], float(e["crest"]))
+        elif kind == "breach":
+            out = apply_breach(g, e["line"], e.get("invert"))
+        else:
+            raise ValueError(f"edit {k + 1}: kind must be levee or breach, not {kind!r}")
+        g["z_burnt"], g["z"] = out.pop("terrain"), out.pop("ground")
+        g["edits"].append({**out, "line": [[round(float(p[0]), 6), round(float(p[1]), 6)] for p in e["line"]]})
+    return g
+
+
+def levee_profile(grid: dict[str, Any], line: Any, h: Any = None, *, wet_m: float = 0.05) -> dict[str, Any]:
+    """The ground and the flood level along a drawn line, for setting a levee's crest: for each cell the line
+    crosses (in order), the distance along the line, the natural ground, the terrain now (with any levee) and,
+    given a run's depth ``h`` (over the burnt bed, as :func:`run_grid` returns it), the water level where it is
+    wetter than ``wet_m`` (None where dry). ``suggested_crest_m`` is the highest water along the line plus
+    :data:`FREEBOARD_M`, rounded up to 10 cm; with no water on the line, the highest ground plus 1 m."""
+    win = grid.get("window", grid)
+    cells = supercover_cells(grid, line)
+    if not cells:
+        raise ValueError("the line does not cross the grid")
+    nat = _natural(grid)
+    rr = np.array([r for r, _ in cells], dtype=np.intp)
+    cc = np.array([c for _, c in cells], dtype=np.intp)
+    dist = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(rr), np.diff(cc)))]) * float(grid.get("dx", win["dx"]))
+    ground = nat["z"][rr, cc]
+    now = np.asarray(grid["z"], dtype="f8")[rr, cc]
+    water: list[float | None] = [None] * len(cells)
+    if h is not None:
+        hh = np.asarray(h, dtype="f8").reshape(np.shape(grid["z"]))[rr, cc]
+        lvl = np.asarray(grid["z_burnt"], dtype="f8")[rr, cc] + hh
+        water = [round(float(v), 2) if d > wet_m else None for v, d in zip(lvl, hh)]
+    wet = [w for w in water if w is not None]
+    top = max(wet) + FREEBOARD_M if wet else float(ground.max()) + 1.0
+    return {"cells": [[int(r), int(c)] for r, c in cells], "distance_m": [round(float(d), 1) for d in dist],
+            "ground_m": [round(float(v), 2) for v in ground], "terrain_m": [round(float(v), 2) for v in now],
+            "water_m": water, "highest_water_m": round(max(wet), 2) if wet else None,
+            "lowest_ground_m": round(float(ground.min()), 2), "highest_ground_m": round(float(ground.max()), 2),
+            "suggested_crest_m": math.ceil(round(top * 10.0, 6)) / 10.0, "freeboard_m": FREEBOARD_M,
+            "length_m": round(_line_m(win, line), 1)}
+
+
+def weir_flow(width_m: float, head_m: float, c: float = WEIR_C) -> float:
+    """A broad-crested weir's flow (m3/s): ``Q = C b H^1.5``, ``b`` the crest's width and ``H`` the upstream water
+    level above the crest (the approach velocity head left out)."""
+    return float(c) * float(width_m) * max(float(head_m), 0.0) ** 1.5
+
+
+def compare_runs(g0: dict[str, Any], h0: Any, g1: dict[str, Any], h1: Any, *, wet_m: float = 0.05
+                 ) -> dict[str, Any]:
+    """Before and after on the same grid (the largest depths of two runs, over the burnt bed as :func:`run_grid`
+    gives them): the wet area of each, the cells kept dry (wet before, dry after), the cells newly wet, and the
+    change in depth where either is wet."""
+    d0 = depth_over_terrain(g0, h0)
+    d1 = depth_over_terrain(g1, h1)
+    w0, w1 = d0 > wet_m, d1 > wet_m
+    a = float(g1["dx"]) ** 2 / 1e6
+    either = w0 | w1
+    diff = (d1 - d0)[either]
+    return {"wet_km2_before": round(float(w0.sum()) * a, 3), "wet_km2_after": round(float(w1.sum()) * a, 3),
+            "wet_km2_change": round(float(w1.sum() - w0.sum()) * a, 3),
+            "kept_dry_km2": round(float((w0 & ~w1).sum()) * a, 3),
+            "newly_wet_km2": round(float((w1 & ~w0).sum()) * a, 3),
+            "max_depth_m_before": round(float(d0.max()), 2), "max_depth_m_after": round(float(d1.max()), 2),
+            "depth_change_m": ({"min": round(float(diff.min()), 2), "max": round(float(diff.max()), 2),
+                                "median": round(float(np.median(diff)), 2)} if diff.size else None)}
+
+
 # ── comparing with a reference map ──────────────────────────────────────────
 
 
