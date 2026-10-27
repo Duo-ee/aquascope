@@ -42,7 +42,7 @@ from aquascope.map_layers import STATUS_CLASSES
 
 __all__ = [
     "ACTION_TYPES", "BASEMAPS", "DIRECTIONS", "EXAMPLES", "LAYERS", "PHOTON_URL", "PLACE_CREDIT", "REGIONS",
-    "FLOOD_DEFAULT_RP", "FLOOD_FLOWS", "ROUTE_DEFAULT_RP", "ROUTE_LIMITS", "ROUTE_SHAPES",
+    "FLOOD_DEFAULT_RP", "FLOOD_FLOWS", "ROUTE_DEFAULT_RP", "SKETCH_LIMITS", "ROUTE_LIMITS", "ROUTE_SHAPES",
     "action_schema", "describe_action", "model_command", "model_prompt", "parse_command", "parse_model_reply",
     "reply_schema", "resolve_actions", "resolve_place", "validate_action", "validate_actions",
 ]
@@ -52,6 +52,7 @@ ACTION_TYPES = (
     "route",
     "paint",
     "flood_reach",
+    "draw_levee", "draw_breach",
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
@@ -63,6 +64,10 @@ ROUTE_DEFAULT_RP = 10.0
 FLOOD_FLOWS = ("forecast_peak", "forecast", "route")
 FLOOD_DEFAULT_RP = 100.0
 FLOOD_RETURN_PERIODS = (2.0, 500.0)
+#: Levees and breaches on Flood it's grid (#663): a line of at most this many points, a crest or an invert in m
+#: above mean sea level, a freeboard above the highest flood along the line in m.
+SKETCH_LIMITS = {"points": 200, "level_m": (-100.0, 9000.0), "freeboard_m": (0.0, 20.0)}
+SKETCHES = ("draw_levee", "draw_breach")
 DIRECTIONS = ("upstream", "downstream", "both")
 STEPS = ("day", "week", "month")
 STATUS_IDS = tuple(c["id"] for c in STATUS_CLASSES)
@@ -332,6 +337,20 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "flow": {"type": "string", "enum": list(FLOOD_FLOWS),
                                  "description": "flood_reach: the forecast peak, the 15-day forecast, or Route "
                                                 "it's wave, instead of a return period"},
+                        "line": {"description": "draw_levee, draw_breach: \"drawn\" (the reader draws it on the "
+                                                "map), or a list of [lon, lat] points the reader gave",
+                                 "anyOf": [{"type": "string", "enum": ["drawn"]},
+                                           {"type": "array", "items": {"type": "array", "items": num,
+                                                                       "minItems": 2, "maxItems": 2}}]},
+                        "from_place": {"type": "string", "description": "draw_levee, draw_breach: the line's start, "
+                                                                        "a place by name"},
+                        "to_place": {"type": "string", "description": "draw_levee, draw_breach: the line's end"},
+                        "crest": {"type": "number", "description": "draw_levee: the crest, m above mean sea level, "
+                                                                   "only when the reader gave it"},
+                        "freeboard_m": {"type": "number", "description": "draw_levee: or the crest this many m "
+                                                                         "above the highest flood along the line"},
+                        "invert": {"type": "number", "description": "draw_breach: the gap's floor, m above mean "
+                                                                    "sea level (none: the natural ground)"},
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
@@ -607,6 +626,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
         return _validate_route(action, out, place)
     if kind == "flood_reach":
         return _validate_flood(action, out, place)
+    if kind in SKETCHES:
+        return _validate_sketch(action, out)
     if kind == "paint":
         if action.get("question") not in PAINT_QUESTIONS:
             return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
@@ -743,6 +764,49 @@ def _validate_flood(action: dict[str, Any], out: dict[str, Any], place: str | No
     return out, None
 
 
+def _validate_sketch(action: dict[str, Any], out: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """A levee or a breach on Flood it's grid (#663): the line (``"drawn"``: the reader draws it on the map; a list
+    of [lon, lat]; or ``from_place`` and ``to_place``, two places the map looks up), and for a levee its crest (m
+    above mean sea level) or a freeboard above the flood along the line (the code computes the crest; 0.5 m when
+    neither is given), for a breach an optional invert. The map rasterises the line and runs Flood it again."""
+    kind = out["type"]
+    line = action.get("line")
+    frm, to = _text(action.get("from_place"), 80), _text(action.get("to_place"), 80)
+    if isinstance(line, (list, tuple)):
+        if not 2 <= len(line) <= SKETCH_LIMITS["points"]:
+            return None, f"{kind}'s line needs 2 to {SKETCH_LIMITS['points']} points"
+        pts = []
+        for p in line:
+            ll = _latlon(p[1], p[0]) if isinstance(p, (list, tuple)) and len(p) == 2 else None
+            if not ll:
+                return None, f"{kind}'s line is a list of [lon, lat] points"
+            pts.append([ll[1], ll[0]])
+        out["line"] = pts
+    elif frm and to:
+        out["from_place"], out["to_place"] = frm, to
+    elif line in (None, "drawn"):
+        out["line"] = "drawn"
+    else:
+        return None, f"{kind}'s line must be \"drawn\", a list of [lon, lat], or from_place and to_place"
+    lo, hi = SKETCH_LIMITS["level_m"]
+    for key in (("crest", "freeboard_m") if kind == "draw_levee" else ("invert",)):
+        v = action.get(key)
+        if v is None:
+            continue
+        rng = SKETCH_LIMITS["freeboard_m"] if key == "freeboard_m" else (lo, hi)
+        if not _finite(v) or not rng[0] <= float(v) <= rng[1]:
+            return None, f"{kind}'s {key} must be a number from {rng[0]:g} to {rng[1]:g} m"
+        out[key] = round(float(v), 2)
+    if kind == "draw_levee" and "crest" in out:
+        out.pop("freeboard_m", None)
+    if kind == "draw_levee" and "crest" not in out and "freeboard_m" not in out:
+        out["freeboard_m"] = 0.5
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
 def validate_actions(actions: Any, today: str | date | None = None) -> dict[str, Any]:
     """Check a list of actions: ``{"actions": [the ones that passed], "errors": [why the others did not]}``."""
     if isinstance(actions, dict):
@@ -837,6 +901,20 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             what = f"the {float(a.get('return_period') or FLOOD_DEFAULT_RP):g}-year flow"
         return f"Flood {where} at {what}"
+    if kind in SKETCHES:
+        what = "a levee" if kind == "draw_levee" else "a breach"
+        if a.get("from_place"):
+            where = f"from {a['from_place']} to {a['to_place']}"
+        elif isinstance(a.get("line"), list):
+            where = f"along {len(a['line'])} points"
+        else:
+            where = "on the map"
+        if kind == "draw_levee":
+            top = (f", crest {float(a['crest']):g} m" if a.get("crest") is not None
+                   else f", {float(a.get('freeboard_m') or 0.5):g} m above the flood")
+        else:
+            top = f", down to {float(a['invert']):g} m" if a.get("invert") is not None else ""
+        return f"Draw {what} {where}{top}, and flood again"
     if kind == "paint":
         where = a.get("label") or a.get("place") or ("the box" if a.get("bbox") else "this view")
         return f"Paint {where}: {PAINT_QUESTIONS[a['question']]['label']}"
@@ -1164,6 +1242,43 @@ def _flood_phrase(c: _Clause) -> None:
     c.add("flood_reach", action)
 
 
+def _sketch_phrase(c: _Clause) -> None:
+    """Levees and breaches (#663): "draw a levee", "draw a levee from Upton upon Severn to Hanley Castle at 14 m",
+    "build a flood wall 1 m above the flood", "draw a breach", "breach the levee". The line is drawn on the map
+    unless two places are named; the crest is the reader's number or a freeboard above the flood."""
+    m = re.search(r"^(?:draw|build|add|put|make|raise)\s+(?:a|an|the)?\s*(?P<what>levee|dyke|dike|flood\s*wall|"
+                  r"embankment|bund|breach|gap)\b(?P<tail>.*)$", c.text)
+    if not m:
+        m = re.search(r"^(?P<what>breach)\s+(?:the\s+|a\s+)?(?:levee|dyke|dike|flood\s*wall|embankment|bund)"
+                      r"(?P<tail>.*)$", c.text)
+    if not m:
+        return
+    kind = "draw_breach" if m.group("what") in ("breach", "gap") else "draw_levee"
+    tail = m.group("tail").strip()
+    action: dict[str, Any] = {"type": kind}
+    num = r"(?P<v>-?\d+(?:\.\d+)?)\s*(?:m|metres?|meters?)\b"
+    fb = re.search(num + r"\s+above\s+the\s+(?:flood|water)", tail)
+    lvl = re.search(r"(?:at|with\s+a\s+crest\s+(?:of|at)|crest(?:\s+(?:of|at))?|to|down\s+to|"
+                    r"invert(?:\s+(?:of|at))?)\s+" + num, tail) if not fb else None
+    if fb:
+        if kind == "draw_levee":
+            action["freeboard_m"] = float(fb.group("v"))
+        tail = (tail[:fb.start()] + tail[fb.end():]).strip()
+    elif lvl:
+        action["crest" if kind == "draw_levee" else "invert"] = float(lvl.group("v"))
+        tail = (tail[:lvl.start()] + tail[lvl.end():]).strip()
+    ends = re.search(r"\bfrom\s+(?P<a>.+?)\s+to\s+(?P<b>.+?)\s*,?$", tail)
+    if ends:
+        action["from_place"] = _place_text(_raw_span(c, ends.group("a")))
+        action["to_place"] = _place_text(_raw_span(c, ends.group("b")))
+    else:
+        action["line"] = "drawn"
+    if kind == "draw_levee" and "crest" not in action:
+        action.setdefault("freeboard_m", 0.5)
+    c.text = ""
+    c.add(kind, action)
+
+
 def _river_phrase(c: _Clause) -> None:
     patterns = [
         (r"^(?:show(?: me)?\s+)?(?:the\s+)?(?:way|path|route)\s+(?:of|from)\s+(?:the\s+)?(?P<p>.+?)"
@@ -1351,7 +1466,8 @@ def _place_phrase(c: _Clause) -> None:
 
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
-                                      "highlight_river", "route", "flood_reach", "add_pin", "paint"))}
+                                      "highlight_river", "route", "flood_reach", "draw_levee", "draw_breach",
+                                      "add_pin", "paint"))}
 
 
 def _parse_clause(raw: str, today: date) -> _Clause:
@@ -1359,8 +1475,8 @@ def _parse_clause(raw: str, today: date) -> _Clause:
     c.text = re.sub(r"^(?:please|hey|ok|okay|now|can you|could you|would you|i want to|i'd like to|let me|let's)\s+",
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
-    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _flood_phrase,
-                 _route_phrase, _river_phrase):
+    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _sketch_phrase, _area_phrase,
+                 _flood_phrase, _route_phrase, _river_phrase):
         step(c)
         if c.actions:
             return c
@@ -1635,6 +1751,24 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
     cache: dict[tuple[str, str], dict[str, Any]] = {}
     out, notes, used = [], [], False
     for a in actions:
+        if a.get("type") in SKETCHES and a.get("from_place"):
+            ends = []
+            for name in (a["from_place"], a["to_place"]):
+                key = (name.lower(), "any")
+                if key not in cache:
+                    cache[key] = resolve_place(name, fetch=fetch)
+                ends.append(cache[key])
+            bad = [e.get("error") or f"{n} has no position" for e, n in zip(ends, (a["from_place"], a["to_place"]))
+                   if e.get("error") or e.get("lat") is None]
+            if bad:
+                notes.extend(bad)
+                continue
+            used = used or any(bool(e.get("credit")) for e in ends)
+            b = {k: v for k, v in a.items() if k not in ("from_place", "to_place")}
+            b["line"] = [[ends[0]["lon"], ends[0]["lat"]], [ends[1]["lon"], ends[1]["lat"]]]
+            b["where"] = f"{ends[0]['name']} to {ends[1]['name']}"
+            out.append(b)
+            continue
         if not a.get("place"):
             out.append({k: v for k, v in a.items() if k != "river"})
             continue
@@ -1788,6 +1922,12 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         '(or "lat" and "lon", or "at": "here" for the river selected on the map) and the flow: "return_period" '
         '(2 to 500 years; 100 when the request gives none), or "flow_cms" (m3/s, only when the reader wrote it), '
         'or "flow": forecast_peak, forecast (the 15-day forecast) or route (Route it\'s wave).',
+        '- draw_levee: a levee on the flooded valley, then flood again (Flood it must be on the map). "line": '
+        '"drawn" (the reader draws it), a list of [lon, lat] the reader gave, or "from_place" and "to_place". '
+        '"crest" in m above mean sea level only when the reader gave a level; otherwise "freeboard_m", the height '
+        'above the highest flood along the line (0.5 when none is said). The map computes the levee and the flood.',
+        '- draw_breach: a gap in a levee, then flood again. "line" as for draw_levee; "invert" only when the reader '
+        'gave the gap\'s floor level.',
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "

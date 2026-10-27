@@ -359,3 +359,43 @@ def test_what_gets_flooded_before_and_after():
     # No water in either: nothing to count, and no file written.
     z = fs.compare_exposure(g, np.zeros((30, 30)), np.zeros((30, 30)), read)
     assert z["buildings"] == {"before": 0, "after": 0, "change": 0}
+
+
+def test_ask_the_map_draws_levees_and_breaches():
+    from aquascope import map_commands as mc
+
+    assert mc.parse_command("draw a levee", today="2026-10-27")["actions"] == [
+        {"type": "draw_levee", "line": "drawn", "freeboard_m": 0.5}]
+    assert mc.parse_command("build a flood wall 1 m above the flood", today="2026-10-27")["actions"] == [
+        {"type": "draw_levee", "line": "drawn", "freeboard_m": 1.0}]
+    assert mc.parse_command("draw a breach from Tewkesbury to Twyning down to 9 m", today="2026-10-27")["actions"] \
+        == [{"type": "draw_breach", "from_place": "Tewkesbury", "to_place": "Twyning", "invert": 9.0}]
+    assert mc.parse_command("draw an area around Paris", today="2026-10-27")["actions"][0]["type"] == "draw_area"
+    ok, why = mc.validate_action({"type": "draw_levee", "line": [[-2.2, 52.0], [-2.1, 52.1]], "crest": 16,
+                                  "freeboard_m": 2})
+    assert why is None and ok == {"type": "draw_levee", "line": [[-2.2, 52.0], [-2.1, 52.1]], "crest": 16.0}
+    assert "2 to 200 points" in mc.validate_action({"type": "draw_levee", "line": [[-2.2, 52.0]]})[1]
+    assert "crest must be" in mc.validate_action({"type": "draw_levee", "line": "drawn", "crest": 1e6})[1]
+    assert "line must be" in mc.validate_action({"type": "draw_breach", "line": "here"})[1]
+    assert mc.describe_action({"type": "draw_levee", "line": "drawn", "freeboard_m": 0.5}) == \
+        "Draw a levee on the map, 0.5 m above the flood, and flood again"
+    # Two named places become the line's two ends; the code looks them up.
+    hits = {"tewkesbury": {"name": "Tewkesbury", "lat": 51.99, "lon": -2.16},
+            "twyning": {"name": "Twyning", "lat": 52.03, "lon": -2.17}}
+    import aquascope.map_commands as mod
+
+    orig = mod.resolve_place
+    try:
+        mod.resolve_place = lambda name, want="any", fetch=None: hits.get(name.lower(), {"error": f"no {name}"})
+        res = mc.resolve_actions([{"type": "draw_breach", "from_place": "Tewkesbury", "to_place": "Twyning"},
+                                  {"type": "draw_levee", "from_place": "Nowhere", "to_place": "Twyning",
+                                   "crest": 14.0}])
+    finally:
+        mod.resolve_place = orig
+    assert res["actions"] == [{"type": "draw_breach", "line": [[-2.16, 51.99], [-2.17, 52.03]],
+                               "where": "Tewkesbury to Twyning"}]
+    assert res["notes"] == ["no Nowhere"]
+    schema = mc.action_schema()
+    props = schema["properties"]["actions"]["items"]["properties"] if "properties" in schema else {}
+    assert not props or {"line", "crest", "freeboard_m", "invert", "from_place", "to_place"} <= set(props)
+    assert "draw_levee" in str(mc.model_prompt("draw a levee"))

@@ -32,6 +32,9 @@ PHRASES = [
     ("go to Bangladesh", [{"type": "fly_to", "place": "Bangladesh"}]),
     ("flood Upton upon Severn at the 100-year flow", [
         {"type": "flood_reach", "place": "Upton upon Severn", "return_period": 100.0}]),
+    ("draw a levee from Upton upon Severn to Hanley Castle at 14 m", [
+        {"type": "draw_levee", "from_place": "Upton upon Severn", "to_place": "Hanley Castle", "crest": 14.0}]),
+    ("breach the levee", [{"type": "draw_breach", "line": "drawn"}]),
     ("route a flood of 500 m3/s from Basel", [
         {"type": "route", "place": "Basel", "peak_cms": 500.0, "duration_h": 24.0, "shape": "triangle"}]),
     ("Fly to Kingston upon Thames", [{"type": "fly_to", "place": "Kingston upon Thames"}]),
