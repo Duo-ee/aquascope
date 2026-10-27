@@ -21,7 +21,9 @@ What is here and why (``docs/stability.md`` has the full policy):
 * Replay an event (#659): ``aquascope.replay`` (a past flood assembled from its data and told as a story),
   ``aquascope replay`` and the MCP tools ``replay_candidates`` and ``replay_event``, new in 1.1.
 * The sketchpad (#664): ``aquascope.sketch``. Drop a well (#660): ``aquascope.sketch.drawdown`` (Theis with
-  superposition), ``aquascope well`` and the MCP tool ``drop_well``, new in 1.1.
+  superposition), ``aquascope well`` and the MCP tool ``drop_well``; change land use (#661):
+  ``aquascope.sketch.landuse`` (the SCS curve number, TR-55), ``aquascope landuse`` and the MCP tool
+  ``change_landuse``; new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -87,6 +89,7 @@ CLI: tuple[str, ...] = (
     "flood",
     "flowstatus",
     "gym",
+    "landuse",
     "layers",
     "map",
     "mesh",
@@ -112,6 +115,7 @@ CLI_FLAGS: dict[str, tuple[str, ...]] = {
 # MCP tool names (``aquascope mcp``).
 MCP_TOOLS: tuple[str, ...] = (
     "area_context",
+    "change_landuse",
     "correct_to_gauge",
     "dated_layers",
     "downstream_ids",
