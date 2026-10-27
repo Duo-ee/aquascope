@@ -120,6 +120,42 @@ def test_status_finds_the_largest_areas_on_each_side():
     assert [f["side"] for f in out] == ["much_below"]
 
 
+def test_a_desert_wet_month_is_not_a_river_much_above_normal():
+    # Ash Shati, Libya (#638): most months carry almost nothing, so the one month the status map paints the
+    # basin much above normal says nothing about the reach. ``usual`` holds the basins' representative points
+    # and their median monthly 75th percentile, as aquascope.map_scout.usual_flow builds them.
+    g = _world()
+    _put(g, 5, 10, 25, 20, 32)                      # much above over Fezzan, a desert basin
+    _put(g, 5, -60, -10, -50, 0)                    # much above over the Amazon, a real river
+    usual = [[27.33, 11.27, 0.019], [-5.0, -55.0, 120000.0]]
+    out = ms.status_findings(g, "2026-09", min_area_km2=1000, usual=usual)
+    dry = [f for f in out if f.get("near_dry")]
+    assert [f["side"] for f in dry] == ["much_above"] and 25 <= dry[0]["lat"] <= 32
+    kept, dropped = ms.split_near_dry(out)
+    assert dropped == 1 and all(not f.get("near_dry") for f in kept)
+    assert any(-10 <= f["lat"] <= 0 for f in kept)                    # the Amazon is still a finding
+    # Without the table nothing is set aside: the table is what says the basin is dry.
+    assert all("near_dry" not in f for f in ms.status_findings(g, "2026-09", min_area_km2=1000))
+
+
+def test_a_river_basin_next_to_the_desert_stays_much_above_normal():
+    # The same map, but the pin's nearest basin is a river: its much above normal area is a real finding, and
+    # the near-dry test reads the nearest basin, not the region. This is what #638 must not break.
+    from aquascope import bulletin
+
+    assert ms.NEAR_DRY_CMS == bulletin.MIN_USUAL_CMS         # one floor for "this carries almost no water"
+    g = _world()
+    _put(g, 5, 10, 25, 20, 32)
+    usual = [[27.33, 11.27, 0.019], [28.0, 14.0, 420.0]]
+    out = ms.status_findings(g, "2026-09", min_area_km2=1000, usual=usual)
+    assert [f["side"] for f in out] == ["much_above"]
+    assert "near_dry" not in out[0]
+    kept, dropped = ms.split_near_dry(out)
+    assert dropped == 0 and kept == out
+    assert out[0]["title"].endswith(": rivers much above normal")
+
+
+
 def test_status_record_uses_the_fixed_named_region_not_the_area_itself():
     g = _world()
     _put(g, 5, 15, -30, 35, -15)
