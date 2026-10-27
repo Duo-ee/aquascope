@@ -642,6 +642,12 @@ def _inside(lon: Any, lat: Any, ring: list[list[float]]) -> Any:
     return inside
 
 
+def _hydro(row: dict[str, Any], q: Any) -> dict[str, Any]:
+    """A reach's hourly flow for a card's chart: its id, peak and the series (m3/s, three significant figures)."""
+    return {"river_id": row["river_id"], "peak_cms": row["peak_cms"], "peak_h": row.get("peak_h"),
+            "dt_h": DT_S / 3600.0, "cms": [_sig(float(v)) for v in q]}
+
+
 def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None, vpu: int | None = None,
                 lat: float | None = None, lon: float | None = None, frames: bool = True,
@@ -654,7 +660,10 @@ def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float
     such, with no soil or wetness behind it. All the reaches below are routed for ``hours``. The unit is the one
     the polygon's centre falls in (``vpu`` overrides it; ``lat``/``lon`` give the point to find it by).
     ``through`` maps a reach (its ``river_id``) to a function its outflow passes through (a reservoir, #662).
-    Returns the reaches with the biggest peaks, the outlet reaches' waves and the animation frames.
+    Returns the reaches with the biggest peaks, the outlet reaches' waves and the animation frames, the hourly
+    hydrographs of the reach with the biggest peak and of the main outlet (``hydrographs``), the box of the reaches
+    the wave reaches (``bbox``) and, in ``storm``, the water that has left by the outlets by the end (``out_m3``,
+    ``out_pct`` of the runoff: the mass balance).
     """
     import numpy as np
 
@@ -735,14 +744,25 @@ def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float
         r["in_storm"] = bool(i in lateral)
     outlets = [j for j, i in enumerate(order) if int(ds_index[i]) < 0 or int(ds_index[i]) not in members]
     best = max(range(len(rows)), key=lambda j: rows[j]["peak_cms"])
+    # The water that has left by the end, for the mass balance the card states (#670): what the outlets passed.
+    out_m3 = float(sum(np.sum((routed[order[j]][1:] + routed[order[j]][:-1]) / 2.0) * DT_S for j in outlets))
+    main = max(outlets, key=lambda j: rows[j]["peak_cms"]) if outlets else best
+    hydro = [{"role": "biggest", **_hydro(rows[best], routed[order[best]])}]
+    if main != best:
+        hydro.append({"role": "outlet", **_hydro(rows[main], routed[order[main]])})
+    lit = [order[j] for j, r in enumerate(rows) if r.get("reached")] or list(under)
     res: dict[str, Any] = {
         "ok": True, "vpu": net.vpu,
         "storm": {"rain_mm": rain, "duration_h": d, "runoff_coefficient": c, "n_reaches": int(len(under)),
                   "area_km2": round(float(np.sum(net.area_m2[under])) / 1e6, 1), "runoff_m3": _sig(volume),
+                  "out_m3": _sig(out_m3), "out_pct": round(100.0 * out_m3 / volume, 1) if volume > 0 else None,
                   "rule": (f"{c:g} of the rain runs off: {c * rain:g} mm over each unit catchment under the storm, "
                            f"spread evenly over {d:g} h. A plain coefficient, no soil, wetness or snow.")},
         "hours": n_steps, "dt_s": DT_S, "n_reaches": len(order),
-        "biggest": rows[best], "outlets": [rows[j] for j in outlets],
+        "biggest": rows[best], "outlets": [rows[j] for j in outlets], "hydrographs": hydro,
+        "bbox": [round(float(np.min(net.lon[lit])), 4), round(float(np.min(net.lat[lit])), 4),
+                 round(float(np.max(net.lon[lit])), 4), round(float(np.max(net.lat[lit])), 4)],
+        "polygon": [[round(p[0], 5), round(p[1], 5)] for p in ring],
         "reaches": sorted(rows, key=lambda r: -r["peak_cms"])[:500],
         "method": METHOD, "check": {"summary": CHECK["summary"], "tolerance": CHECK["tolerance"]},
         "notes": [NOTE_MODEL, "Only the storm's runoff is routed: these are the flows it adds."],
