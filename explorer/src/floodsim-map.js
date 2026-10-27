@@ -25,7 +25,7 @@ import { packedRamp, paintGrid } from "./mesh-views-core.js?v=__BUILD__";
 import { clearMesh, currentMesh, onMeshCleared, openModelFile, runMeshTool } from "./mesh-view.js?v=__BUILD__";
 import { setMeshLens } from "./mesh-views.js?v=__BUILD__";
 import {
-  FLOODSIM_CREDIT, LABEL, WET_M, corners, pxLonLat, runLoop, summary, terrariumElevation, ugridFile,
+  FLOODSIM_CREDIT, LABEL, WET_M, corners, depthOverTerrain, pxLonLat, runLoop, summary, terrariumElevation, ugridFile,
   unpackDepth, wetAtWall, wetBox, windowTiles,
 } from "./floodsim-core.js?v=__BUILD__";
 import { createGpuSim, gpuAvailable } from "./floodsim-gpu.js?v=__BUILD__";
@@ -36,8 +36,9 @@ const CAP_GPU_H = 72;      // the cap of a steady run on the GPU (h of model tim
 const CAP_CPU_H = 48;      // and in the worker, on cells twice as large
 const CHOICES = [2, 10, 25, 50, 100];
 const DOCS = "https://rekin226.github.io/aquascope/floodsim/";
-const JRC_LINE = "Where it differs from JRC's 100-year map: it floods the small streams JRC leaves out, it is about " +
-  "1.5 m shallower on the plain on the reaches checked (the docs say why), and it has no bathymetry or defences.";
+const JRC_LINE = "Where it differs from JRC's 100-year map: it floods the small streams JRC leaves out, and it is " +
+  "1.5 m to 2.7 m shallower on the plain on the reaches checked, mostly because GEOGLOWS's 100-year flows there are " +
+  "1.5 to 3.4 times smaller than GloFAS's, which JRC's maps are made from. No bathymetry, no defences.";
 
 let target = null;       // { river_id, lat, lon, name }
 let plan = null;         // the worker's plan for target
@@ -142,6 +143,8 @@ export async function floodIt(t, { choice = { return_period: 100 }, by = "rules"
   openPanel();
   closeCard();
   hideBasinWash(true);
+  if (inViews) { inViews = null; if (currentMesh()) clearMesh(); }
+  setSwipe(false);
   try {
     if (!plan) {
       setStatus("Reading the river network around this reach and every river's flood flows…");
@@ -170,10 +173,11 @@ export async function floodIt(t, { choice = { return_period: 100 }, by = "rules"
       if (my !== running) return;
       run.frames.push(f);
       if (first === null && f.t > 0) first = (performance.now() - started) / 1000;
-      const s = summary(h, g.dx);
+      const over = depthOverTerrain(h, g.z, g.ground);
+      const s = summary(over, g.dx);
       run.scale = { lo: 0, hi: Math.max(run.scale.hi, niceCeil(Math.max(s.max_m * 0.8, 0.5))), sqrt: true };
       const now = performance.now();
-      if (now - lastDraw > 60 || f.t === 0) { draw(run, h); lastDraw = now; hideBasinWash(true); }
+      if (now - lastDraw > 60 || f.t === 0) { draw(run, over); lastDraw = now; hideBasinWash(true); }
       setStatus(`Flooding on your ${gpu ? "GPU" : "CPU"}… ${hm(f.t)} in, ${fmt(s.wet_km2, 1)} km² under water`, "busy");
     };
     let res;
@@ -199,9 +203,10 @@ export async function floodIt(t, { choice = { return_period: 100 }, by = "rules"
     run.steadyAt = res.steadyAt;
     run.t = run.frames.at(-1).t;
     run.hMax = res.hMax;
-    run.stats = summary(res.hMax, g.dx);
-    run.atWall = wetAtWall(res.hMax, g.nx, g.ny, g.edges);
-    run.scale = { lo: 0, hi: niceCeil(Math.max(quantile(res.hMax, 0.99), 0.5)), sqrt: true };
+    run.over = depthOverTerrain(res.hMax, g.z, g.ground);
+    run.stats = summary(run.over, g.dx);
+    run.atWall = wetAtWall(run.over, g.nx, g.ny, g.edges, g.sources);
+    run.scale = { lo: 0, hi: niceCeil(Math.max(quantile(run.over, 0.99), 0.5)), sqrt: true };
     const before = slotValue("floodsim");
     status = null;
     hideBasinWash(true);
@@ -319,7 +324,7 @@ function splitSide(run) {
 
 function frameDepth(run, i) {
   const f = run.frames[i];
-  return f && f.idx ? unpackDepth(f, run.g.nx * run.g.ny) : run.hMax;
+  return f && f.idx ? depthOverTerrain(unpackDepth(f, run.g.nx * run.g.ny), run.g.z, run.g.ground) : run.over;
 }
 
 function show(run, { fit = false, step = null } = {}) {
@@ -349,7 +354,7 @@ function paintStep(run, i) {
 
 function fitWater(run) {
   if (!state.mapOk || !map) return;
-  const box = wetBox(run.hMax, run.g.nx, run.g.ny);
+  const box = wetBox(run.over, run.g.nx, run.g.ny);
   if (!box) return;
   const [w, n] = pxLonLat(run.win.x0 + box.c0, run.win.y0 + box.r0, run.win.zoom);
   const [e, s] = pxLonLat(run.win.x0 + box.c1 + 1, run.win.y0 + box.r1 + 1, run.win.zoom);
@@ -392,8 +397,7 @@ function hideBasinWash(hide) {
 
 function runFile(run) {
   if (run.file) return run.file;
-  const bed = run.g.z;
-  const { bytes } = ugridFile({ win: run.win, bed, hMax: run.hMax, frames: run.frames, start: run.start,
+  const { bytes } = ugridFile({ win: run.win, bed: run.g.z, ground: run.g.ground, hMax: run.hMax, frames: run.frames, start: run.start,
     title: `Flood it, ${run.target.name || `reach ${run.target.river_id}`}, ${run.label}` });
   run.file = new File([bytes], `Flood it, ${run.label}.nc`, { type: "application/x-netcdf" });
   return run.file;
@@ -449,17 +453,8 @@ function placeSwipe() {
 }
 
 function initSwipe() {
-  let el = $("fi-swipe");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "fi-swipe";
-    el.className = "wi-swipe";
-    el.hidden = true;
-    el.innerHTML = '<div class="wi-sw-line"></div><span class="wi-sw-label wi-sw-before"></span>' +
-      '<span class="wi-sw-label wi-sw-after"></span><button type="button" class="wi-sw-handle" aria-label="Move the line ' +
-      'between the two runs" role="slider" aria-valuemin="0" aria-valuemax="100">⇆</button>';
-    (map ? map.getContainer().parentElement : document.body).appendChild(el);
-  }
+  const el = $("fi-swipe");
+  if (!el) return;
   const handle = el.querySelector(".wi-sw-handle");
   let frame = 0;
   const redraw = () => { placeSwipe(); if (!frame) frame = requestAnimationFrame(() => { frame = 0; if (shown) paintStep(shown, shown.step); }); };
@@ -485,19 +480,13 @@ function initSwipe() {
 // ── the panel ───────────────────────────────────────────────────────────────
 
 function ensurePanel() {
-  let el = panel();
-  if (el) return el;
-  el = document.createElement("section");
-  el.id = "floodit";
-  el.className = "whatif floodit";
-  el.hidden = true;
-  el.setAttribute("aria-labelledby", "fi-title");
-  const host = $("route") ? $("route").parentElement : (map ? map.getContainer().parentElement : document.body);
-  host.appendChild(el);
+  const el = panel();
+  if (!el || el.dataset.ready) return el;
+  el.dataset.ready = "1";
   el.addEventListener("click", onPanelClick);
   el.addEventListener("submit", (e) => {
     e.preventDefault();
-    const v = Number($("fi-q").value);
+    const v = Number(el.querySelector("#fi-q").value);
     if (v > 0 && target) floodIt(target, { choice: { flow_cms: v } });
   });
   el.addEventListener("change", (e) => {
@@ -511,6 +500,7 @@ function ensurePanel() {
 
 function openPanel() {
   const el = ensurePanel();
+  if (!el) return;
   el.hidden = false;
   el.classList.remove("done");
   render();
@@ -584,8 +574,9 @@ function render() {
       <h2 id="fi-title" class="wi-title">${escapeHtml(name)}</h2></div>
       <button type="button" class="wi-close" data-act="close" aria-label="Close Flood it" title="Close and take the flood off the map">×</button></header>
     ${picker}${flowLine}${st}${result}
-    <p class="fi-credit">${escapeHtml(LABEL)}. <button type="button" class="link-btn" data-act="clear">Clear</button></p>`;
+    <p class="fi-credit">${escapeHtml(LABEL)}. ${inViews && currentMesh() ? '<button type="button" class="link-btn" data-act="back">Back to Flood it</button> · ' : ""}<button type="button" class="link-btn" data-act="clear">Clear</button></p>`;
   panel().classList.toggle("done", Boolean(run && !status));
+  panel().classList.toggle("mini", Boolean(run && inViews === run && currentMesh()));
 }
 
 const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
@@ -598,6 +589,7 @@ function onPanelClick(e) {
   if (!act) return;
   if (act === "peak") floodIt(target, { choice: { forecast: "peak" } });
   else if (act === "close" || act === "clear") clearByUndo({ close: act === "close" });
+  else if (act === "back") { if (currentMesh()) clearMesh(); }
   else if (act === "swipe") { other = runs.filter((r) => r !== shown).at(-1) || null; setSwipe(!swipe.on); }
   else if (["hazard", "arrival", "section", "exposure"].includes(act)) openViews(act);
 }

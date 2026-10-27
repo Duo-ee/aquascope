@@ -56,7 +56,7 @@ __all__ = [
     "ALPHA", "CAP_HOURS", "G", "H_DRY", "N_CHANNEL", "N_FLOODPLAIN", "RETURN_PERIODS", "STEADY_TOL", "THETA",
     "TERRARIUM", "annual_maxima", "burn_channel", "cell_velocity", "channel_depth", "compare_depths", "corridor",
     "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "forecast_series", "frame_times",
-    "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
+    "depth_over_terrain", "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
     "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "return_period_for", "ritter", "run_grid",
     "run_summary", "simulate", "stream_reaches", "terrain_grid", "terrain_window", "terrarium_elevation", "window",
 ]
@@ -1370,9 +1370,15 @@ def run_grid(g: dict[str, Any], *, cap_hours: float = CAP_HOURS, steady_tol: flo
                     frames_uv=frames)
 
 
+def depth_over_terrain(g: dict[str, Any], h: Any) -> np.ndarray:
+    """The water's depth above the terrain the map is drawn from: the depth over the burnt bed less the channel
+    cut, never below zero. Off the channels the two are the same; in a channel this is the water over its banks."""
+    return np.maximum(np.asarray(g["z_burnt"]) + np.asarray(h) - np.asarray(g["z"]), 0.0)
+
+
 def run_summary(g: dict[str, Any], res: dict[str, Any], wet_m: float = 0.05) -> dict[str, Any]:
-    """The numbers a card or a JSON file gives for a run."""
-    hm = res["h_max"]
+    """The numbers a card or a JSON file gives for a run (depths above the terrain, :func:`depth_over_terrain`)."""
+    hm = depth_over_terrain(g, res["h_max"])
     wet = hm > wet_m
     dx = g["dx"]
     edge_wet = bool(wet[0, :].any() or wet[-1, :].any() or wet[:, 0].any() or wet[:, -1].any())
@@ -1560,10 +1566,14 @@ def to_ugrid(path: str, g: dict[str, Any], res: dict[str, Any], *, start: str | 
     node_x = (win["x0"] + nc) / s * 360.0 - 180.0
     node_y = np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * (win["y0"] + nr) / s))))
     fx, fy = cell_lonlat({**win}, rows, cols)
-    bed = np.asarray(g["z_burnt"], dtype="f8").reshape(-1)[cells]
+    # The bed a reader sees is the terrain (the channels' cut is the model's, not the ground's): the level is the
+    # water over the burnt bed, never below the terrain.
+    bed = np.asarray(g["z"], dtype="f8").reshape(-1)[cells]
+    burnt = np.asarray(g["z_burnt"], dtype="f8").reshape(-1)[cells]
     frames = res["frames"]
     uv = res.get("uv") or [(None, None)] * len(frames)
-    s1 = np.stack([bed + np.asarray(f, dtype="f8").reshape(-1)[cells] for f in frames]).astype("f4")
+    s1 = np.stack([np.maximum(bed, burnt + np.asarray(f, dtype="f8").reshape(-1)[cells]) for f in frames]
+                  ).astype("f4")
     ux = np.stack([np.nan_to_num(np.asarray(u, dtype="f8").reshape(-1)[cells]) if u is not None
                    else np.zeros(cells.size) for u, _ in uv]).astype("f4")
     uy = np.stack([np.nan_to_num(np.asarray(v, dtype="f8").reshape(-1)[cells]) if v is not None
@@ -1601,8 +1611,7 @@ def to_ugrid(path: str, g: dict[str, Any], res: dict[str, Any], *, start: str | 
         v.units = f"seconds since {t0} 00:00:00"
         v.standard_name = "time"
         for name, dims, data, units, long in (
-                ("mesh2d_flowelem_bl", ("nmesh2d_face",), bed.astype("f4"), "m",
-                 "bed level (terrain, channels burnt in)"),
+                ("mesh2d_flowelem_bl", ("nmesh2d_face",), bed.astype("f4"), "m", "bed level (the terrain)"),
                 ("mesh2d_s1", ("time", "nmesh2d_face"), s1, "m", "water level (the bed where dry)"),
                 ("mesh2d_ucx", ("time", "nmesh2d_face"), ux, "m s-1", "eastward velocity"),
                 ("mesh2d_ucy", ("time", "nmesh2d_face"), uy, "m s-1", "northward velocity")):

@@ -1819,7 +1819,8 @@ try:
         _p = _FS[str(_k["river_id"])]
         _zz = _np.frombuffer(_fs_z.to_py(), dtype="<f4").astype("f8")
         _g = _fs.prepare_grid(_p, _zz, _k.get("choice") or {"return_period": 100}, coarse=bool(_k.get("coarse")))
-        _arrays = {"z": _g["z_burnt"].astype("<f4").ravel(), "n": _g["n"].astype("<f4").ravel()}
+        _arrays = {"z": _g["z_burnt"].astype("<f4").ravel(), "n": _g["n"].astype("<f4").ravel(),
+                   "ground": _g["z"].astype("<f4").ravel()}
         _out = {"ok": True, "window": _g["window"], "nx": _g["nx"], "ny": _g["ny"], "dx": _g["dx"],
                 "sources": [[s["cell"][0], s["cell"][1], s["flow"]] for s in _g["sources"]],
                 "inflows": [{"river_id": s["river_id"], "into": s["into"], "enters": s["enters"], "order": s["order"],
@@ -1846,7 +1847,7 @@ _fs_out = json.dumps(_out, default=str)
   const transfer = [];
   const arrays = pyodide.globals.get("_arrays");
   if (arrays) {
-    for (const key of ["z", "n"]) {
+    for (const key of ["z", "n", "ground"]) {
       const arr = arrays.get(key);
       const buf = arr.getBuffer();
       try { result[key] = new Float32Array(buf.data); transfer.push(result[key].buffer); } finally { buf.release(); arr.destroy(); }

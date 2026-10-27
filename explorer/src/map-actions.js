@@ -412,6 +412,15 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       await actions.routeFlood({ ...reach, name: a.label || a.where || "" }, args, { by, command, label });
       return log.live().slice(-1)[0];
     }
+    case "flood_reach": {
+      // Flood it (#658): floodsim-map.js runs it (the grid and the flows from aquascope.floodsim in the worker),
+      // draws it and logs it with the run it replaced; nothing to log here.
+      if (!actions.floodReach) throw new Error("Flood it is not on this page");
+      const reach = a.at === "here" ? hereReach() : await snapRiver(a);
+      if (!reach) throw new Error("select a river first (click one), or name a place");
+      await actions.floodReach({ ...reach, name: a.label || a.where || "" }, a, { by, command, label });
+      return log.live().slice(-1)[0];
+    }
     case "draw_area":
       after = { bbox: a.bbox, label: a.label || a.where || "" };
       drawArea(id, after);
@@ -539,6 +548,7 @@ const ICON = {
   paint: '<path d="M19.5 3.5c-3.2 1.2-7.4 5.1-9.6 8.3l1.9 1.9c3.2-2.2 7.1-6.4 8.3-9.6Z"/><path d="M9.4 12.6c-1.9 0-3.3 1.4-3.5 3.3-.2 1.7-.9 2.6-2.4 3.1 3.4 1.4 7.3.3 7.7-3.2.1-1.2-.5-2.3-1.8-3.2Z"/>',
   what_if: '<path d="M4 17c3 0 3-3 6-3s3 3 6 3 2-2 4-2"/><path d="M9 4.5a3 3 0 1 1 3 3.5v1.6"/><path d="M12 11.6h.01"/>',
   route: '<path d="M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/><path d="M6 9c1.5-3 3-4 4.5-4S13 7 14 9s2.5 3 4 2"/>',
+  flood_reach: '<path d="M3 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M3 19c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M12 3v7M9 7l3 3 3-3"/>',
 };
 
 const icon = (type) => `<svg class="ma-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +

@@ -375,6 +375,13 @@ export async function runLoop(engine, { nx, ny, dx, hours, steady = true, onFram
 
 // ── the summary and the drawing ─────────────────────────────────────────────
 
+/** The water above the terrain (aquascope.floodsim.depth_over_terrain): bed + h - ground, never below 0. */
+export function depthOverTerrain(h, bed, ground) {
+  const out = new Float32Array(h.length);
+  for (let i = 0; i < h.length; i++) { const v = bed[i] + h[i] - ground[i]; out[i] = v > 0 ? v : 0; }
+  return out;
+}
+
 /** The wet area (km2) and the deepest depth of a depth grid. */
 export function summary(h, dx, wet = WET_M) {
   let cells = 0, deepest = 0;
@@ -394,16 +401,20 @@ export function wetBox(h, nx, ny, wet = WET_M) {
   return r1 < 0 ? null : { r0, r1, c0, c1 };
 }
 
-/** Whether water stands at a walled edge (the grid may be too small there). */
-export function wetAtWall(h, nx, ny, edges, wet = WET_M) {
+/**
+ * Whether water stands at a walled edge away from the rivers that enter there (the grid may be too small: the valley
+ * goes on past the wall). sources: [[row, col, ...]]; an edge cell within `near` cells of an inflow does not count.
+ */
+export function wetAtWall(h, nx, ny, edges, sources = [], wet = WET_M, near = 40) {
   const codes = edgeCodes(nx, ny, edges);
+  const far = (r, c) => sources.every(([sr, sc]) => Math.max(Math.abs(sr - r), Math.abs(sc - c)) > near);
   for (let c = 0; c < nx; c++) {
-    if (codes.n[c] === 0 && h[c] > wet) return true;
-    if (codes.s[c] === 0 && h[(ny - 1) * nx + c] > wet) return true;
+    if (codes.n[c] === 0 && h[c] > wet && far(0, c)) return true;
+    if (codes.s[c] === 0 && h[(ny - 1) * nx + c] > wet && far(ny - 1, c)) return true;
   }
   for (let r = 0; r < ny; r++) {
-    if (codes.w[r] === 0 && h[r * nx] > wet) return true;
-    if (codes.e[r] === 0 && h[r * nx + nx - 1] > wet) return true;
+    if (codes.w[r] === 0 && h[r * nx] > wet && far(r, 0)) return true;
+    if (codes.e[r] === 0 && h[r * nx + nx - 1] > wet && far(r, nx - 1)) return true;
   }
   return false;
 }
@@ -527,8 +538,9 @@ export function netcdf3(spec) {
 export const NC_TYPES = NC;
 
 /**
- * The UGRID file of a run. run: { win { x0, y0, nx, ny, zoom }, bed (ny*nx), hMax, frames: [packFrame], start (ISO
- * date of time 0), title }. Returns { bytes, cells }.
+ * The UGRID file of a run. run: { win { x0, y0, nx, ny, zoom }, bed (the burnt bed, ny*nx), ground (the terrain),
+ * hMax, frames: [packFrame], start (ISO date of time 0), title }. The file's bed is the terrain and its level the
+ * water over the burnt bed, never below the terrain, as aquascope.floodsim.to_ugrid. Returns { bytes, cells }.
  */
 export function ugridFile(run) {
   const { win } = run;
@@ -552,8 +564,10 @@ export function ugridFile(run) {
     conn[4 * k] = nodeOf(r + 1, c); conn[4 * k + 1] = nodeOf(r + 1, c + 1);
     conn[4 * k + 2] = nodeOf(r, c + 1); conn[4 * k + 3] = nodeOf(r, c);
     const [lo, la] = pxLonLat(win.x0 + c + 0.5, win.y0 + r + 0.5, zoom);
-    fx[k] = lo; fy[k] = la; bed[k] = run.bed[i];
+    fx[k] = lo; fy[k] = la; bed[k] = run.ground ? run.ground[i] : run.bed[i];
   }
+  const burnt = new Float32Array(nf);
+  for (let k = 0; k < nf; k++) burnt[k] = run.bed[cells[k]];
   const nt = run.frames.length;
   const s1 = new Float32Array(nt * nf), ux = new Float32Array(nt * nf), uy = new Float32Array(nt * nf);
   run.frames.forEach((f, j) => {
@@ -562,7 +576,7 @@ export function ugridFile(run) {
     for (let k = 0; k < f.idx.length; k++) {
       const m = slot[f.idx[k]];
       if (m < 0) continue;
-      s1[base + m] = bed[m] + f.h[k];
+      s1[base + m] = Math.max(bed[m], burnt[m] + f.h[k]);
       ux[base + m] = Number.isFinite(f.u[k]) ? f.u[k] : 0;
       uy[base + m] = Number.isFinite(f.v[k]) ? f.v[k] : 0;
     }
@@ -586,7 +600,7 @@ export function ugridFile(run) {
       { name: "time", dims: ["time"], type: NC.DOUBLE, data: run.frames.map((f) => f.t),
         atts: { units: `seconds since ${run.start || "2000-01-01"} 00:00:00`, standard_name: "time" } },
       { name: "mesh2d_flowelem_bl", dims: ["nmesh2d_face"], type: NC.FLOAT, data: bed,
-        atts: { mesh: "mesh2d", location: "face", units: "m", standard_name: "altitude", long_name: "bed level (terrain, channels burnt in)" } },
+        atts: { mesh: "mesh2d", location: "face", units: "m", standard_name: "altitude", long_name: "bed level (the terrain)" } },
       { name: "mesh2d_s1", dims: ["time", "nmesh2d_face"], type: NC.FLOAT, data: s1,
         atts: { mesh: "mesh2d", location: "face", units: "m", long_name: "water level (the bed where dry)" } },
       { name: "mesh2d_ucx", dims: ["time", "nmesh2d_face"], type: NC.FLOAT, data: ux,

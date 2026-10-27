@@ -36,10 +36,15 @@
 .fi-credit { margin: .4rem 0 0; font-size: .66rem; color: var(--muted); line-height: 1.35; }
 .floodit .wi-status .spinner { flex: none; }
 
+/* while the run is open in the flood views: a strip at the top right, so the views' own panels have the map */
+.floodit.mini { top: 64px; bottom: auto; }
+.floodit.mini .fi-flows, .floodit.mini .fi-more, .floodit.mini .fi-flow, .floodit.mini .fi-how { display: none; }
+
 /* a phone: a bottom sheet, folded to the answer after a run so the flood above shows */
 @media (max-width: 640px) {
   .floodit { width: auto; max-height: 46vh; }
   .floodit.done .fi-more, .floodit.done .fi-flow, .floodit.done .fi-credit, .floodit.done .wi-kicker { display: none; }
   .floodit.done .fi-how { display: none; }
   .fi-flows { grid-template-columns: repeat(5, 1fr) 1.7fr; }
+  .floodit.mini { top: auto; bottom: 8px; max-height: 22vh; }
 }

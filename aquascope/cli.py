@@ -1180,6 +1180,60 @@ def cmd_map(args: argparse.Namespace) -> None:
         print(f"\n  {res['credit']}")
 
 
+def cmd_flood(args: argparse.Namespace) -> None:
+    """`aquascope flood`: Flood it (#658), a screening flood of a river's valley from a reach (local-inertial
+    scheme, every river in the grid fed at the same return period), with the depth written to files."""
+    from pathlib import Path
+
+    from aquascope import floodsim
+
+    for name in ("aquascope", "httpx"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    if args.river is None and args.at is None:
+        print("  Give a river_id, or --at LAT LON to snap.")
+        sys.exit(1)
+    lat, lon = (args.at or (None, None))
+    series = None
+    if args.forecast:
+        series = floodsim.forecast_series(args.river) if args.river else None
+        if series is None:
+            print("  --forecast needs a river_id.")
+            sys.exit(1)
+    try:
+        out = floodsim.flood_reach(args.river, lat, lon, return_period=args.rp, flow_cms=args.flow, series=series,
+                                   hours=args.hours, coarse=not args.fine)
+    except (LookupError, ValueError, RuntimeError, ImportError) as exc:
+        print(f"  Could not flood this reach: {exc}")
+        sys.exit(1)
+    s = out["summary"]
+    folder = Path(args.out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = f"flood-{s['river_id']}"
+    files = {}
+    if args.format in ("geotiff", "both"):
+        files["depth_geotiff"] = floodsim.to_geotiff(str(folder / f"{stem}-max-depth.tif"), out["grid"],
+                                                      floodsim.depth_over_terrain(out["grid"],
+                                                                                  out["run"]["h_max"]))["path"]
+    if args.format in ("netcdf", "both"):
+        files["ugrid_netcdf"] = floodsim.to_ugrid(str(folder / f"{stem}.nc"), out["grid"], out["run"],
+                                                  start=series["start"][:10] if series else None)["path"]
+    s["files"] = files
+    (folder / f"{stem}.json").write_text(json.dumps(s, indent=2, ensure_ascii=False, default=str))
+    s["files"]["summary_json"] = str(folder / f"{stem}.json")
+    if args.json:
+        print(json.dumps(s, indent=2, ensure_ascii=False, default=str))
+        return
+    steady = f"steady after {s['steady_at_h']:g} h" if s["steady_at_h"] else f"run for {s['hours_run']:g} h"
+    print(f"  Reach {s['river_id']}: {s['flow']} ({s['flow_cms']:,.0f} m³/s here), {len(s['sources'])} inflows at the "
+          f"same return period.")
+    print(f"  {s['wet_km2']:,.2f} km² under water, deepest {s['max_depth_m']:.1f} m, {steady}; {s['nx']} x {s['ny']} "
+          f"cells of {s['cell_m']:.1f} m, {s['steps']:,} steps in {s['wall_s']:.0f} s.")
+    for k, v in files.items():
+        print(f"  {k}: {v}")
+    print(f"  summary: {s['files']['summary_json']}")
+    print(f"  {s['label']}.")
+
+
 def cmd_route(args: argparse.Namespace) -> None:
     """`aquascope route flood|storm|check`: a flood wave down GEOGLOWS's own river network, Muskingum routing (#656)."""
     from aquascope import routing
@@ -4938,6 +4992,24 @@ def main() -> None:
     p_map.add_argument("--api-key", default=None)
     p_map.add_argument("--today", default=None, help="Read dates as if today were YYYY-MM-DD")
     p_map.add_argument("--json", action="store_true")
+    # ── flood it (#658) ─────────────────────────────────────────────
+    p_flood = sub.add_parser("flood", help="Flood it: a screening flood of a river's valley from a reach (the "
+                             "Explorer's Flood it), depth written as GeoTIFF and NetCDF")
+    p_flood.add_argument("river", nargs="?", type=int, default=None, help="A GEOGLOWS v2 river_id")
+    p_flood.add_argument("--at", nargs=2, type=float, metavar=("LAT", "LON"), help="Snap this point first")
+    p_flood.add_argument("--rp", type=float, default=None, help="The return period, years (100 by default)")
+    p_flood.add_argument("--flow", type=float, default=None, help="Or a flow at this reach, m3/s")
+    p_flood.add_argument("--forecast", action="store_true", help="Or GEOGLOWS's 15-day forecast as a hydrograph")
+    p_flood.add_argument("--hours", type=float, default=None,
+                         help="The cap of a steady run in hours (72); a hydrograph runs to its end")
+    p_flood.add_argument("--fine", action="store_true",
+                         help="The Explorer's GPU grid (cells of about 24 m): several minutes in numpy; by default "
+                              "cells twice as large, as the Explorer without WebGPU")
+    p_flood.add_argument("--out-dir", default=".", help="Where to write the files (.)")
+    p_flood.add_argument("--format", choices=["geotiff", "netcdf", "both"], default="both",
+                         help="geotiff: the largest depth (EPSG:3857); netcdf: the UGRID run that `aquascope mesh` "
+                              "and the Explorer's model viewer read; both (the default)")
+    p_flood.add_argument("--json", action="store_true")
     # ── route it (#656) ─────────────────────────────────────────────
     p_route = sub.add_parser("route", help="A flood wave down GEOGLOWS's own river network (Muskingum routing): "
                              "the Explorer's Route a flood from here")
@@ -5901,6 +5973,7 @@ def main() -> None:
         "mesh": cmd_mesh,
         "whatif": cmd_whatif,
         "route": cmd_route,
+        "flood": cmd_flood,
         "swmm": cmd_swmm,
         "river": cmd_river,
         "evidence": cmd_evidence,

@@ -351,15 +351,18 @@ def test_a_run_on_the_valley_reaches_steady_state_and_writes_its_files(tmp_path)
     m = read_mesh(out["path"])
     assert m.n_cells == out["faces"] and m.variable == "depth" and m.has_velocity
     assert len(m.times) == len(res["times_s"]) and m.times[0] == "2026-10-27T00:00:00"
-    assert np.nanmax(m.max_value) == pytest.approx(float(res["h_max"].max()), rel=1e-3)
+    # The file's depth is the water above the terrain (the channel's cut is the model's, not the ground's).
+    over = fs.depth_over_terrain(g, res["h_max"])
+    framed = max(float(fs.depth_over_terrain(g, f).max()) for f in res["frames"])   # the file keeps the frames
+    assert np.nanmax(m.max_value) == pytest.approx(framed, rel=1e-3)
     lenses = mesh_lenses(m)
     assert {"hazard", "arrival"} <= set(lenses.meta["available"])
-    tif = fs.to_geotiff(str(tmp_path / "depth.tif"), g, res["h_max"])
+    tif = fs.to_geotiff(str(tmp_path / "depth.tif"), g, over)
     rasterio = pytest.importorskip("rasterio")
     with rasterio.open(tif["path"]) as src:
         assert src.crs.to_epsg() == 3857 and src.width == g["nx"] and src.height == g["ny"]
         a = src.read(1)
-        assert np.nanmax(np.where(a == src.nodata, np.nan, a)) == pytest.approx(float(res["h_max"].max()), rel=1e-5)
+        assert np.nanmax(np.where(a == src.nodata, np.nan, a)) == pytest.approx(float(over.max()), rel=1e-5)
         w, s_, e, n_ = g["window"]["bounds"]
         from pyproj import Transformer
 
@@ -428,3 +431,61 @@ def test_stream_tile_pieces_are_cut_to_their_tiles_and_joined_end_to_end():
     cols = [c for _, c in cells]
     assert cols == sorted(cols) or cols == sorted(cols, reverse=True)
     assert len(cells) >= 55
+
+
+# ── the three faces: the CLI, the MCP tool and Ask the map ─────────────────
+
+
+def _offline(monkeypatch):
+    plan, z = _valley_plan()
+    monkeypatch.setattr(fs, "plan_window", lambda *a, **k: plan)
+    monkeypatch.setattr(fs, "terrain_window", lambda *a, **k: {"z": z})
+    return plan
+
+
+def test_cli_flood_writes_the_depth_and_the_run(tmp_path, monkeypatch, capsys):
+    from aquascope import cli
+
+    _offline(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["aquascope", "flood", "2", "--rp", "10", "--hours", "12", "--out-dir",
+                                     str(tmp_path)])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "the 10-year flow" in out and "km² under water" in out
+    for name in ("flood-2-max-depth.tif", "flood-2.nc", "flood-2.json"):
+        assert (tmp_path / name).exists(), name
+    import json
+
+    s = json.loads((tmp_path / "flood-2.json").read_text())
+    assert s["river_id"] == 2 and s["wet_km2"] > 0 and s["licences"]["flows"].startswith("GEOGLOWS")
+
+
+def test_mcp_flood_reach(tmp_path, monkeypatch):
+    from aquascope.mcp_server import flood_reach
+
+    _offline(monkeypatch)
+    s = flood_reach(2, return_period=25, hours=12, out_dir=str(tmp_path))
+    assert s["flow"] == "the 25-year flow" and s["sources"] and s["wet_km2"] > 0
+    assert set(s["files"]) == {"depth_geotiff", "ugrid_netcdf"}
+    assert "screening flood" in s["label"]
+
+
+def test_ask_the_map_flood_reach_is_read_checked_and_said():
+    from aquascope import map_commands as mc
+
+    res = mc.parse_command("flood the Severn at Tewkesbury with 500 m3/s", today="2026-10-27")
+    assert res["actions"] == [{"type": "flood_reach", "place": "Severn at Tewkesbury", "flow_cms": 500.0}]
+    assert mc.parse_command("flood here", today="2026-10-27")["actions"] == [
+        {"type": "flood_reach", "at": "here", "return_period": 100.0}]
+    assert mc.parse_command("flood this river with the forecast peak", today="2026-10-27")["actions"][0]["flow"] == \
+        "forecast_peak"
+    assert mc.parse_command("flood depth on", today="2026-10-27")["actions"][0]["type"] == "set_layer"
+    ok, why = mc.validate_action({"type": "flood_reach", "lat": 52.06, "lon": -2.21})
+    assert why is None and ok["return_period"] == 100.0
+    assert "return_period" in mc.validate_action({"type": "flood_reach", "at": "here", "return_period": 1000})[1]
+    assert "flow must be" in mc.validate_action({"type": "flood_reach", "at": "here", "flow": "guess"})[1]
+    assert mc.validate_action({"type": "flood_reach"})[1].startswith("flood_reach needs")
+    assert mc.describe_action({"type": "flood_reach", "at": "here", "return_period": 10}) == \
+        "Flood the selected river at the 10-year flow"
+    assert "flood_reach" in mc.model_prompt("flood it")["system"] if isinstance(mc.model_prompt("flood it"), dict) \
+        else "flood_reach" in str(mc.model_prompt("flood it"))
