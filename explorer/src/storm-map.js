@@ -49,11 +49,12 @@ function ensureLayers() {
   if (map.getSource(SRC)) return true;
   const before = beforeId();
   map.addSource(SRC, { type: "geojson", data: stormFeatures(null) });
-  map.addLayer({ id: L.fill, type: "fill", source: SRC,
+  const isArea = ["==", ["geometry-type"], "Polygon"];
+  map.addLayer({ id: L.fill, type: "fill", source: SRC, filter: isArea,
     paint: { "fill-color": "#3b82c4", "fill-opacity": ["case", ["==", ["get", "live"], 1], 0.22, 0.14] } }, before);
-  map.addLayer({ id: L.line, type: "line", source: SRC, layout: { "line-join": "round" },
+  map.addLayer({ id: L.line, type: "line", source: SRC, filter: isArea, layout: { "line-join": "round" },
     paint: { "line-color": INK, "line-width": 2.2, "line-dasharray": [2.2, 1.2] } }, before);
-  map.addLayer({ id: L.label, type: "symbol", source: SRC,
+  map.addLayer({ id: L.label, type: "symbol", source: SRC, filter: ["==", ["geometry-type"], "Point"],
     layout: { "text-field": ["get", "label"], "text-font": ["Noto Sans Bold"], "text-size": 13, "text-allow-overlap": true },
     paint: { "text-color": INK, "text-halo-color": "rgba(255,255,255,0.95)", "text-halo-width": 2 } });
   if (!hooked) {
@@ -143,7 +144,7 @@ function say(html, kind = "") {
 export function openStorm({ draw = true } = {}) {
   const p = panel();
   if (!p) return;
-  for (const id of ["whatif", "route"]) { const el = $(id); if (el) el.hidden = true; }   // one panel at a time
+  for (const id of ["whatif", "route", "reservoir"]) { const el = $(id); if (el) el.hidden = true; }   // one panel at a time
   if (actions.closeMapCard) actions.closeMapCard({ restore: false });
   p.hidden = false;
   p.classList.toggle("done", Boolean(wave));
@@ -246,7 +247,7 @@ async function run({ by = "rules", command = "", label = "" } = {}) {
 // The wave on the map changed (a run, an undo, a replay's wave): the card follows it.
 function followWave(value) {
   // The area stays the action log's (its own slot): an undo of a run leaves the area where the reader last put it.
-  wave = value && value.result && value.result.storm ? value : null;
+  wave = value && value.result && value.result.storm && !value.result.reservoir ? value : null;   // a reservoir's is its own
   if (wave) {
     const s = wave.result.storm;
     $("st-rain").value = s.rain_mm;

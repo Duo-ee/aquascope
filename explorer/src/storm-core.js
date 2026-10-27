@@ -43,13 +43,19 @@ export function stormLabel(s) {
   return `${Number(s.rain_mm)} mm in ${hoursWords(s.duration_h)}`;
 }
 
-/** The area on the map: the outline (closed) with its label, and the outline being changed, if any. */
+/**
+ * The area on the map: the outline (closed), and its label once at the middle of its corners (a polygon's own label
+ * would be placed again in every tile it crosses).
+ */
 export function stormFeatures(storm, { live = false } = {}) {
   if (!storm || !storm.polygon || storm.polygon.length < 3) return { type: "FeatureCollection", features: [] };
   const ring = [...storm.polygon, storm.polygon[0]];
-  return { type: "FeatureCollection", features: [{ type: "Feature",
-    properties: { label: stormLabel(storm), live: live ? 1 : 0 },
-    geometry: { type: "Polygon", coordinates: [ring] } }] };
+  const n = storm.polygon.length;
+  const mid = [storm.polygon.reduce((a, p) => a + p[0], 0) / n, storm.polygon.reduce((a, p) => a + p[1], 0) / n];
+  return { type: "FeatureCollection", features: [
+    { type: "Feature", properties: { live: live ? 1 : 0 }, geometry: { type: "Polygon", coordinates: [ring] } },
+    { type: "Feature", properties: { label: stormLabel(storm) }, geometry: { type: "Point", coordinates: mid } },
+  ] };
 }
 
 /** The [[w, s], [e, n]] box of an outline, or null. */
