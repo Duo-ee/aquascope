@@ -269,3 +269,93 @@ def test_before_and_after_on_the_same_grid():
     assert c["kept_dry_km2"] > 0 and c["wet_km2_after"] < c["wet_km2_before"]
     assert c["wet_km2_change"] == pytest.approx(c["wet_km2_after"] - c["wet_km2_before"], abs=2e-3)
     assert c["depth_change_m"]["max"] > 0                       # the water stands deeper in front of the levee
+
+
+# ── the three faces ─────────────────────────────────────────────────────────
+
+
+def _offline(monkeypatch):
+    from tests.test_floodsim import _valley_plan
+
+    plan, z = _valley_plan()
+    monkeypatch.setattr(fs, "plan_window", lambda *a, **k: plan)
+    monkeypatch.setattr(fs, "terrain_window", lambda *a, **k: {"z": z})
+    return plan
+
+
+def _valley_levee(plan) -> dict:
+    """A levee along the valley's north side, 25 cells off the river, and its crest above the 10-year flood."""
+    w = plan["window"]
+    lat = fs._px_lonlat(w["x0"], w["y0"] + 45.5, w["zoom"])[1]
+    lon0 = fs._px_lonlat(w["x0"] + 20, w["y0"], w["zoom"])[0]
+    lon1 = fs._px_lonlat(w["x0"] + 280, w["y0"], w["zoom"])[0]
+    return {"type": "LineString", "coordinates": [[lon0, lat], [lon1, lat]]}
+
+
+def test_edits_from_the_arguments():
+    ln = [[-2.0, 52.0], [-1.9, 52.0]]
+    assert fs.edits_from([ln], [15.0]) == [{"kind": "levee", "line": ln, "crest": 15.0}]
+    assert fs.edits_from(ln, 15.0, ln) == [{"kind": "levee", "line": ln, "crest": 15.0},
+                                          {"kind": "breach", "line": ln, "invert": None}]
+    with pytest.raises(ValueError):
+        fs.edits_from([ln])
+    with pytest.raises(ValueError):
+        fs.edits_from([ln, ln, ln], [1.0, 2.0])
+
+
+def test_cli_flood_with_a_levee_runs_before_and_after(tmp_path, monkeypatch, capsys):
+    from aquascope import cli
+
+    plan = _offline(monkeypatch)
+    (tmp_path / "levee.geojson").write_text(json.dumps(_valley_levee(plan)))
+    monkeypatch.setattr("sys.argv", ["aquascope", "flood", "2", "--rp", "100", "--hours", "8", "--levee",
+                                     str(tmp_path / "levee.geojson"), "--crest", "40", "--out-dir", str(tmp_path)])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Levee at 40 m" in out and "Before:" in out and "kept dry" in out
+    s = json.loads((tmp_path / "flood-2.json").read_text())
+    assert s["edits"][0]["kind"] == "levee" and s["edits"][0]["cells"] > 100
+    assert s["change"]["kept_dry_km2"] > 0 and s["before"]["wet_km2"] == s["change"]["wet_km2_before"]
+
+
+def test_mcp_flood_reach_with_a_levee_and_a_breach(monkeypatch):
+    from aquascope.mcp_server import flood_reach
+
+    plan = _offline(monkeypatch)
+    lv = _valley_levee(plan)
+    a, b = lv["coordinates"]
+    gap = [[a[0] + (b[0] - a[0]) * 0.45, a[1]], [a[0] + (b[0] - a[0]) * 0.55, a[1]]]
+    s = flood_reach(2, return_period=100, hours=8, levee=lv, crest=40.0, breach=gap)
+    assert [e["kind"] for e in s["edits"]] == ["levee", "breach"]
+    assert s["edits"][1]["lowered"] > 10 and s["change"]["wet_km2_before"] > 0
+
+
+def test_what_gets_flooded_before_and_after():
+    """Two depth grids as two steps of one mesh: each building and stretch of road says before, after or both."""
+    g = _grid(np.full((30, 30), 10.0))
+    before = np.zeros((30, 30))
+    after = np.zeros((30, 30))
+    before[5:15, 5:25] = 1.0          # a levee keeps rows 10 to 14 dry after
+    after[5:10, 5:25] = 1.2
+    after[20:25, 5:10] = 0.4          # and sends water somewhere new
+
+    def square(r, c):
+        a, b = _ll(g, r + 0.3, c + 0.3), _ll(g, r + 0.7, c + 0.7)
+        return {"id": f"b{r}-{c}", "class": None, "parts": [[[a, [b[0], a[1]], b, [a[0], b[1]], a]]]}
+
+    read = {"buildings": [square(7, 10), square(12, 10), square(12, 20), square(22, 7), square(28, 28)],
+            "roads": [{"id": "r1", "class": "primary", "parts": [[[_ll(g, 12.5, 2), _ll(g, 12.5, 28)]]]}],
+            "population": {"lon": [_ll(g, 12.5, 15.5)[0]], "lat": [_ll(g, 12.5, 15.5)[1]], "people": [90.0],
+                           "step": [1e-4, 1e-4]},
+            "info": {}, "errors": {}}
+    c = fs.compare_exposure(g, before, after, read)
+    assert c["buildings"] == {"before": 3, "after": 2, "change": -1}
+    assert sorted(f["id"] for f in c["kept_dry"]) == ["b12-10", "b12-20"]
+    assert [f["id"] for f in c["newly_flooded"]] == ["b22-7"] and c["still_flooded"] == 1
+    assert c["roads_km"]["before"] > 0 and c["roads_km"]["after"] == 0 and c["roads_km"]["change"] < 0
+    assert {p["change"] for p in c["roads_changed"]} == {"kept_dry"}
+    assert c["people"] == {"before": 90.0, "after": 0.0, "change": -90.0}
+    assert "licence" in json.dumps(c["sources"]).lower()
+    # No water in either: nothing to count, and no file written.
+    z = fs.compare_exposure(g, np.zeros((30, 30)), np.zeros((30, 30)), read)
+    assert z["buildings"] == {"before": 0, "after": 0, "change": 0}

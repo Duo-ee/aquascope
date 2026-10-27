@@ -36,7 +36,7 @@ scheme is for.
 Terrain: the Terrarium tiles the Explorer's hillshade uses (``elevation-tiles-prod``, Mapzen/Tilezen joerd, a
 mix of SRTM, GMTED, ETOPO1 and national lidar; decode ``h = R*256 + G + B/256 - 32768``). No bathymetry: the river
 is burnt in (:func:`burn_channel`). This is a screening flood: terrain errors of metres, no levees unless the
-terrain shows them, no rain, a constant inflow.
+terrain shows them or one is drawn (:func:`apply_levee`, :func:`apply_breach`, #663), no rain.
 
 numpy and the standard library only (the PNG tiles are decoded with zlib), so it runs in Pyodide too.
 """
@@ -54,7 +54,9 @@ import numpy as np
 
 __all__ = [
     "ALPHA", "CAP_HOURS", "G", "H_DRY", "N_CHANNEL", "N_FLOODPLAIN", "RETURN_PERIODS", "STEADY_TOL", "THETA",
-    "TERRARIUM", "annual_maxima", "burn_channel", "cell_velocity", "channel_depth", "compare_depths", "corridor",
+    "TERRARIUM", "WEIR_C", "annual_maxima", "apply_breach", "apply_levee", "burn_channel", "compare_exposure",
+    "compare_runs", "edit_grid", "edits_from", "levee_profile", "read_line", "supercover_cells", "weir_flow",
+    "cell_velocity", "channel_depth", "compare_depths", "corridor",
     "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "forecast_series", "frame_times",
     "depth_over_terrain", "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
     "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "return_period_for", "ritter", "run_grid",
@@ -700,6 +702,43 @@ def read_line(geo: Any) -> list[list[list[float]]]:
     if kind == "MultiLineString":
         return [[[float(p[0]), float(p[1])] for p in ln] for ln in geo["coordinates"]]
     raise ValueError(f"a levee or a breach is a line, not a {kind}")
+
+
+def edits_from(levees: Any = (), crests: Any = (), breaches: Any = (), inverts: Any = ()) -> list[dict[str, Any]]:
+    """The edits of :func:`edit_grid` from the CLI's and the MCP tool's arguments: ``levees`` and ``breaches`` are
+    each a list of lines (GeoJSON, as text or a dict, or a list of [lon, lat]: :func:`read_line`, so one entry may
+    hold several lines); ``crests`` is one crest for every levee or one per entry (m above mean sea level), and
+    ``inverts`` likewise for the breaches (none: the natural ground). Levees first, then breaches."""
+    def many(x: Any) -> list[Any]:
+        if x is None:
+            return []
+        if isinstance(x, (str, dict)) or (isinstance(x, list) and x and isinstance(x[0], (list, tuple))
+                                          and x[0] and isinstance(x[0][0], (int, float))):
+            return [x]
+        return list(x)
+
+    def pick(vals: list[Any], k: int, what: str) -> Any:
+        if not vals:
+            return None
+        if len(vals) == 1:
+            return vals[0]
+        if k >= len(vals):
+            raise ValueError(f"give one {what} for all, or one for each")
+        return vals[k]
+
+    lv, br = many(levees), many(breaches)
+    cr = [float(c) for c in many(crests) if c is not None] if not isinstance(crests, (int, float)) else [float(crests)]
+    iv = [float(c) for c in many(inverts) if c is not None] if not isinstance(inverts, (int, float)) \
+        else [float(inverts)]
+    out: list[dict[str, Any]] = []
+    for k, geo in enumerate(lv):
+        crest = pick(cr, k, "crest")
+        if crest is None:
+            raise ValueError("a levee needs a crest: an elevation in m above mean sea level")
+        out += [{"kind": "levee", "line": ln, "crest": crest} for ln in read_line(geo)]
+    for k, geo in enumerate(br):
+        out += [{"kind": "breach", "line": ln, "invert": pick(iv, k, "invert")} for ln in read_line(geo)]
+    return out
 
 
 def edit_grid(grid: dict[str, Any], edits: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1645,6 +1684,8 @@ def run_summary(g: dict[str, Any], res: dict[str, Any], wet_m: float = 0.05) -> 
         "exits": g["exits"], "channel_slope": g["slope"], "steps": res["steps"],
         "wall_s": round(res["wall_s"], 2), "volume": {k: round(v, 3) for k, v in res["volume"].items()},
         "water_at_walled_edge": edge_wet and not g["exits"],
+        **({"edits": [{k: v for k, v in e.items() if k != "cells"} | {"cells": len(e["cells"])}
+                      for e in g["edits"]]} if g.get("edits") else {}),
         "label": LABEL, "method": SCHEME, "flows_from": FLOW_METHOD, "licences": LICENCES,
     }
 
@@ -1665,14 +1706,17 @@ def flood_reach(river_id: int | None = None, lat: float | None = None, lon: floa
                 return_period: float | None = None, flow_cms: float | None = None,
                 series: dict[str, Any] | None = None, hours: float | None = None, coarse: bool = False,
                 terrain_fetch: Callable[[str], bytes] | None = None, frames: bool = True,
+                edits: list[dict[str, Any]] | None = None, compare: bool = False,
                 **plan_kwargs: Any) -> dict[str, Any]:
     """A screening flood from a river reach (``river_id``, or the reach nearest ``lat``/``lon``), the whole way:
     :func:`plan_window`, the terrain (:func:`terrain_window`), :func:`prepare_grid` and :func:`run_grid`.
 
     The flow is ``return_period`` (years; 100 when nothing is given), ``flow_cms`` (m3/s at the clicked reach) or
     ``series`` (a hydrograph at the clicked reach, ``{"t_s": [...], "q": [...], "label": ...}``). ``hours`` caps
-    the run (:data:`CAP_HOURS` by default; a hydrograph runs to its end). Returns ``{"plan", "grid", "run",
-    "summary"}``."""
+    the run (:data:`CAP_HOURS` by default; a hydrograph runs to its end). ``edits`` are levees and breaches
+    (:func:`edit_grid`) applied to the grid before the run; with ``compare`` the grid is also run without them,
+    and the answer has ``before`` (its grid, run and summary) and the summary a ``change`` (:func:`compare_runs`).
+    Returns ``{"plan", "grid", "run", "summary"}``."""
     if series is not None:
         choice: dict[str, Any] = {"series": series, "label": series.get("label") or "a hydrograph"}
     elif flow_cms is not None:
@@ -1683,8 +1727,20 @@ def flood_reach(river_id: int | None = None, lat: float | None = None, lon: floa
     w = plan["window"]
     terr = terrain_window(w["x0"], w["y0"], w["nx"], w["ny"], w["zoom"], fetch=terrain_fetch)
     g = prepare_grid(plan, terr["z"], choice, coarse=coarse)
+    out: dict[str, Any] = {"plan": plan}
+    if edits:
+        edited = edit_grid(g, edits)
+        if compare:
+            r0 = run_grid(g, cap_hours=float(hours or CAP_HOURS), frames=frames)
+            out["before"] = {"grid": g, "run": r0, "summary": run_summary(g, r0)}
+        g = edited
     res = run_grid(g, cap_hours=float(hours or CAP_HOURS), frames=frames)
-    return {"plan": plan, "grid": g, "run": res, "summary": run_summary(g, res)}
+    s = run_summary(g, res)
+    if "before" in out:
+        b = out["before"]["summary"]
+        s["before"] = {k: b[k] for k in ("wet_km2", "max_depth_m", "steady_at_h", "hours_run")}
+        s["change"] = compare_runs(out["before"]["grid"], out["before"]["run"]["h_max"], g, res["h_max"])
+    return {**out, "grid": g, "run": res, "summary": s}
 
 
 def _join(segments: list[tuple[float, float, float, float]]) -> list[list[tuple[float, float]]]:
@@ -1873,6 +1929,57 @@ def to_ugrid(path: str, g: dict[str, Any], res: dict[str, Any], *, start: str | 
             if name == "mesh2d_flowelem_bl":
                 v.standard_name = "altitude"
     return {"path": path, "faces": int(cells.size), "steps": len(frames)}
+
+
+def compare_exposure(g: dict[str, Any], before: Any, after: Any, read: dict[str, Any], *,
+                     threshold_m: float | None = None) -> dict[str, Any]:
+    """What gets flooded before and after a levee or a breach: the buildings, the road length and the people under
+    two depth grids on the same grid (depths above the terrain, :func:`depth_over_terrain`), counted by
+    :func:`aquascope.flood_exposure.exposure_payload` (the flood views' own count) from what
+    :func:`aquascope.flood_exposure.read_sources` read. The two runs go in as two time steps of one UGRID file, so
+    every building and stretch of road says whether it was flooded before, after, or both.
+
+    Returns ``before``, ``after`` and ``change`` for each count, the buildings and road pieces whose state changed
+    (``kept_dry``: flooded before, dry after; ``newly_flooded``: dry before, flooded after) with their outlines,
+    the threshold and each source's licence and credit."""
+    import os
+    import tempfile
+
+    from aquascope.flood_exposure import exposure_payload
+    from aquascope.io.mesh import read_mesh
+
+    d0 = np.maximum(np.asarray(before, dtype="f8").reshape(g["ny"], g["nx"]), 0.0)
+    d1 = np.maximum(np.asarray(after, dtype="f8").reshape(g["ny"], g["nx"]), 0.0)
+    zero = {"before": 0, "after": 0, "change": 0}
+    if not ((d0 > 0.01).any() or (d1 > 0.01).any()):
+        return {"buildings": dict(zero), "roads_km": dict(zero), "people": dict(zero), "kept_dry": [],
+                "newly_flooded": [], "roads_changed": [], "sources": {}, "errors": dict(read.get("errors", {}))}
+    flat = {**g, "z_burnt": g["z"]}
+    run = {"h_max": np.maximum(d0, d1), "frames": [d0, d1], "times_s": [0.0, 3600.0]}
+    fd, path = tempfile.mkstemp(suffix=".nc")
+    os.close(fd)
+    try:
+        to_ugrid(path, flat, run, start="2000-01-01", title="Flood it, before and after")
+        m = read_mesh(path)
+        pay = exposure_payload(m, read, threshold_m=threshold_m)
+        m.close()
+    finally:
+        os.unlink(path)
+    out: dict[str, Any] = {"threshold_m": pay["threshold_m"], "sources": pay["sources"],
+                           "errors": pay.get("errors", {}), "limits": pay.get("limits", {})}
+    for key, src, field in (("buildings", "buildings", "per_step"), ("roads_km", "roads", "per_step_km"),
+                            ("people", "population", "per_step")):
+        if src in pay:
+            b, a = pay[src][field][0], pay[src][field][1]
+            out[key] = {"before": b, "after": a, "change": round(a - b, 3)}
+    feats = pay.get("buildings", {}).get("features", [])
+    out["kept_dry"] = [{"id": f["id"], "ring": f["ring"]} for f in feats if f["wet"] == "10"]
+    out["newly_flooded"] = [{"id": f["id"], "ring": f["ring"]} for f in feats if f["wet"] == "01"]
+    out["still_flooded"] = sum(1 for f in feats if f["wet"] == "11")
+    out["roads_changed"] = [{"coords": p["coords"], "change": "kept_dry" if p["wet"] == "10" else "newly_flooded",
+                             "length_m": p["length_m"]}
+                            for p in pay.get("roads", {}).get("pieces", []) if p["wet"] in ("10", "01")]
+    return out
 
 
 def to_geotiff(path: str, g: dict[str, Any], depth: Any, *, nodata: float = -9999.0) -> dict[str, Any]:
