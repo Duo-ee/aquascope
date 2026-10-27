@@ -248,8 +248,12 @@ function frame(res) {
     if (r.width && r.right < c.left + c.width / 2) pad.left = Math.max(pad.left, r.right - c.left + 24);
   }
   if (p && !p.hidden) {
-    if (narrow()) pad.bottom = Math.min(p.offsetHeight + 24, map.getContainer().clientHeight * 0.55);
-    else pad.right = p.offsetWidth + 50;
+    if (narrow()) {
+      // a sheet: at the bottom while it asks, at the top once it answers (route.css); keep the area in the rest
+      const r = p.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
+      if (r.top - c.top < c.height / 3) pad.top = Math.min(r.bottom - c.top + 16, c.height * 0.6);
+      else pad.bottom = Math.min(c.bottom - r.top + 16, c.height * 0.6);
+    } else pad.right = p.offsetWidth + 50;
   }
   try { map.fitBounds(box, { padding: pad, maxZoom: 14, duration: 600 }); } catch { /* not ready */ }
 }
