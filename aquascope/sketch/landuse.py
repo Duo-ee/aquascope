@@ -321,17 +321,31 @@ def polygon_area_km2(polygon: Any) -> float:
 
 
 def _get(url: str) -> bytes:
+    """GET a whole file, once more if the first try fails (a tile server's hiccup should not end the run)."""
+    try:
+        return _get_once(url)
+    except OSError:
+        return _get_once(url)
+
+
+def _get_once(url: str) -> bytes:
     """GET a whole file: httpx in CPython, urllib (patched by pyodide-http) in the Explorer's worker."""
     if sys.platform == "emscripten":  # pragma: no cover - only under Pyodide
         import urllib.request
 
-        with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 - https data hosts
-            return resp.read()
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 - https data hosts
+                return resp.read()
+        except Exception as exc:  # noqa: BLE001 - a JsException from the browser's XHR is not an OSError
+            raise OSError(f"{url}: {exc}") from exc
     import httpx
 
-    r = httpx.get(url, timeout=60, follow_redirects=True,
-                  headers={"User-Agent": "aquascope (https://github.com/Rekin226/aquascope)"})
-    r.raise_for_status()
+    try:
+        r = httpx.get(url, timeout=60, follow_redirects=True,
+                      headers={"User-Agent": "aquascope (https://github.com/Rekin226/aquascope)"})
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise OSError(f"{url}: {exc}") from exc
     return r.content
 
 
