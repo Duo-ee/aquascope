@@ -227,20 +227,24 @@ def _route_reach(inflow: Any, lateral: Any, coef: tuple[float, float, float, flo
 
 def route_network(order: Any, ds_index: Any, k: Any, x: Any, n_steps: int, *, dt: float = DT_S,
                   inflow: dict[int, Any] | None = None, lateral: dict[int, Any] | None = None,
-                  outflow: dict[int, Any] | None = None, q0: dict[int, float] | None = None) -> dict[int, Any]:
+                  outflow: dict[int, Any] | None = None, q0: dict[int, float] | None = None,
+                  through: dict[int, Any] | None = None) -> dict[int, Any]:
     """Route a set of reaches (row indices ``order``, upstream first) for ``n_steps`` steps of ``dt`` seconds.
 
     ``inflow[i]`` (``n_steps + 1`` values at the step ends, m3/s) enters reach ``i`` at its top, on top of what
     the reaches in the set above it send; ``lateral[i]`` (``n_steps`` values, one per step) is its own
     catchment's runoff; ``outflow[i]`` replaces the routed outflow of reach ``i`` (a reach whose flow is given,
-    not routed). ``q0[i]`` is the starting outflow (0 by default). Returns ``{i: outflow series}`` for every
-    reach in ``order``. A reach's water goes on to ``ds_index[i]`` when that reach is in the set."""
+    not routed). ``q0[i]`` is the starting outflow (0 by default). ``through[i]`` is a function the reach's
+    outflow passes through before it goes on (a reservoir at the reach's downstream end, #662): it takes the series
+    and returns the series that leaves. Returns ``{i: outflow series}`` for every reach in ``order``. A reach's
+    water goes on to ``ds_index[i]`` when that reach is in the set."""
     import numpy as np
 
     inflow = inflow or {}
     lateral = lateral or {}
     outflow = outflow or {}
     q0 = q0 or {}
+    through = through or {}
     order = [int(i) for i in order]
     members = set(order)
     nn, mm = plan(np.asarray(k, dtype=float)[order], np.asarray(x, dtype=float)[order], dt)
@@ -265,6 +269,8 @@ def route_network(order: Any, ds_index: Any, k: Any, x: Any, n_steps: int, *, dt
             lat = lateral.get(i)
             q = _route_reach(top, None if lat is None else np.asarray(lat, dtype=float), coef_cache[key], n,
                              float(q0.get(i, 0.0)))
+        if i in through:
+            q = np.asarray(through[i](q), dtype=float)
         out[i] = q
         d = int(ds_index[i])
         if d >= 0 and d in members:
@@ -464,7 +470,7 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
           shape: str = "triangle", hours: int | None = None, max_reaches: int = MAX_PATH,
           along: bool = True, places: list[dict[str, Any]] | None = None, frames: bool = True,
           stations: list[dict[str, Any]] | None = None, inflow_cms: list[float] | None = None,
-          inflow_source: str | None = None) -> dict[str, Any]:
+          inflow_source: str | None = None, through: dict[int, Any] | None = None) -> dict[str, Any]:
     """A flood wave from a reach down its river to the sea: what arrives where, when, and how flat.
 
     Water enters at the downstream end of ``river_id`` (or the reach snapped at ``lat``/``lon``): a hydrograph
@@ -484,6 +490,9 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
     hour from the first (m3/s), routed for as many hours as it has (``hours`` at most) with every reach on the path
     starting at its first value, so a river already in flow does not fill from empty. ``inflow_source`` says where
     the series came from. The answer is then the flow that water alone brings down the path.
+
+    ``through`` maps a reach on the path (its ``river_id``) to a function its outflow passes through, a reservoir
+    at its downstream end (:func:`aquascope.sketch.reservoir.route_reservoir`, #662).
     """
     import numpy as np
 
@@ -546,8 +555,9 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
         n_steps = h if h is not None else _auto_hours(d, k_path)
         q_in = hydrograph(peak, d, n_steps, shape=shape)
         start_q = None
-    routed = (route_network(path, ds_index, k, x, n_steps, outflow={i0: q_in}, q0=start_q) if len(path) > 1
-              else {i0: q_in})
+    passes = {net.index(int(r)): fn for r, fn in (through or {}).items() if net.index(int(r)) is not None}
+    routed = (route_network(path, ds_index, k, x, n_steps, outflow={i0: q_in}, q0=start_q, through=passes)
+              if len(path) > 1 else {i0: passes[i0](q_in) if i0 in passes else q_in})
     ids = [int(net.ids[i]) for i in path]
     series = [routed[i] for i in path]
     rows = _reach_rows(ids, series, peak, DT_S, n_steps)
@@ -634,7 +644,8 @@ def _inside(lon: Any, lat: Any, ring: list[list[float]]) -> Any:
 
 def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None, vpu: int | None = None,
-                lat: float | None = None, lon: float | None = None, frames: bool = True) -> dict[str, Any]:
+                lat: float | None = None, lon: float | None = None, frames: bool = True,
+                through: dict[int, Any] | None = None) -> dict[str, Any]:
     """A drawn storm turned into runoff and routed down every river below it.
 
     ``polygon`` is a ring of ``[lon, lat]``. Every reach whose unit catchment's centre (GEOGLOWS's ERA5 weight
@@ -642,6 +653,7 @@ def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float
     evenly over ``duration_h`` hours; the runoff coefficient is a plain share of the rain that runs off, said as
     such, with no soil or wetness behind it. All the reaches below are routed for ``hours``. The unit is the one
     the polygon's centre falls in (``vpu`` overrides it; ``lat``/``lon`` give the point to find it by).
+    ``through`` maps a reach (its ``river_id``) to a function its outflow passes through (a reservoir, #662).
     Returns the reaches with the biggest peaks, the outlet reaches' waves and the animation frames.
     """
     import numpy as np
@@ -712,7 +724,8 @@ def route_storm(polygon: list[list[float]], *, rain_mm: float, duration_h: float
         q = c * rain / 1000.0 * float(net.area_m2[i]) / (d * 3600.0)
         lateral[int(i)] = q * on
         volume += c * rain / 1000.0 * float(net.area_m2[i])
-    routed = route_network(order, ds_index, k, x, n_steps, lateral=lateral)
+    passes = {net.index(int(r)): fn for r, fn in (through or {}).items() if net.index(int(r)) is not None}
+    routed = route_network(order, ds_index, k, x, n_steps, lateral=lateral, through=passes)
     peaks = {i: float(np.max(routed[i])) for i in order}
     top = max(peaks.values()) if peaks else 0.0
     ids = [int(net.ids[i]) for i in order]

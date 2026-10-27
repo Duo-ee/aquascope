@@ -1016,6 +1016,39 @@ def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 
     return res
 
 
+def route_reservoir(polygon: list[list[float]], crest_m: float = 15.0, top_m: float | None = None,
+                    width_m: float = 30.0, coefficient: float | None = None, return_period: float | None = None,
+                    peak_cms: float | None = None, duration_h: float = 24.0, from_river_id: int | None = None,
+                    storm_polygon: list[list[float]] | None = None, rain_mm: float | None = None,
+                    storm_duration_h: float = 6.0, runoff_coefficient: float = 0.3,
+                    hours: int | None = None) -> dict[str, Any]:
+    """Sketchpad (#662): a reservoir drawn as polygon (a ring of [lon, lat]) across a GEOGLOWS v2 river, a flood
+    routed through it with level-pool (storage-indication) routing and on down the river with Route it. The storage
+    is the Terrarium terrain inside the polygon; the outflow a broad-crested spillway width_m wide with its crest
+    crest_m above the lowest ground (top_m: the top of the dam). The flood: return_period or peak_cms over
+    duration_h entering at the dam's reach (or from_river_id upstream), or a storm (storm_polygon, rain_mm,
+    storm_duration_h, runoff_coefficient). Returns the reservoir's inflow and outflow hydrographs at the dam, the
+    peak reduction and delay, the highest level and storage, the run without the reservoir for comparison, and
+    the reaches below. Checked against NRCS NEH 630 Chapter 17 Example 17-2 (in the answer). Modelled."""
+    from aquascope.sketch.reservoir import route_reservoir as _run
+
+    storm = None
+    if storm_polygon is not None:
+        storm = {"polygon": storm_polygon, "rain_mm": rain_mm, "duration_h": storm_duration_h,
+                 "runoff_coefficient": runoff_coefficient}
+    res = _run(polygon, crest_m=crest_m, top_m=top_m, width_m=width_m, coefficient=coefficient,
+               return_period=return_period, peak_cms=peak_cms, duration_h=duration_h, from_river_id=from_river_id,
+               storm=storm, hours=hours, frames=False)
+    if isinstance(res.get("reaches"), list) and len(res["reaches"]) > 60:
+        rows = res["reaches"]
+        step = max(1, len(rows) // 50)
+        res["reaches"] = [r for j, r in enumerate(rows) if j % step == 0 or j == len(rows) - 1]
+    res.pop("geometry", None)
+    if isinstance(res.get("reservoir"), dict):
+        res["reservoir"].pop("curve", None)
+    return res
+
+
 def mesh_review(path: str, crs: str | None = None, offline: bool = False,
                 geometry: str | None = None) -> dict[str, Any]:
     """Review a model result on a mesh (#564): checks made by code on a HEC-RAS 2D plan HDF5 file or a UGRID
@@ -1808,6 +1841,7 @@ def build_server():
     server.tool()(whatif_map)
     server.tool()(route_flood)
     server.tool()(route_storm)
+    server.tool()(route_reservoir)
     server.tool()(flood_reach)
     server.tool()(replay_candidates)
     server.tool()(replay_event)

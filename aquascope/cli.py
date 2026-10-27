@@ -1324,11 +1324,15 @@ def cmd_replay(args: argparse.Namespace) -> None:
 
 
 def cmd_route(args: argparse.Namespace) -> None:
-    """`aquascope route flood|storm|check`: a flood wave down GEOGLOWS's own river network, Muskingum routing (#656)."""
+    """`aquascope route flood|storm|check|reservoir`: a flood wave down GEOGLOWS's own river network, Muskingum
+    routing (#656), and through a drawn reservoir (#662)."""
     from aquascope import routing
 
     for name in ("aquascope", "httpx"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    if args.route_cmd == "reservoir":
+        _route_reservoir(args)
+        return
     if args.route_cmd == "check":
         res = routing.retro_check(args.upstream, args.downstream, args.start, args.end, spin_up_h=args.spin_up,
                                   lateral=args.lateral)
@@ -1381,6 +1385,63 @@ def cmd_route(args: argparse.Namespace) -> None:
     for note in res.get("notes") or []:
         print(f"  {note}")
     print(f"  {res['attribution']}")
+
+
+def _route_reservoir(args: argparse.Namespace) -> None:
+    """`aquascope route reservoir`: a flood through a reservoir drawn as a polygon, level-pool routing (#662)."""
+    from aquascope.sketch import reservoir as rv
+
+    if args.check:
+        res = rv.neh_check()
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+        print(f"  {res['reference']}")
+        print(f"  {'day':>6}{'inflow':>9}{'book':>8}{'here':>9}{'diff':>8}   (ft3/s)")
+        for r in res["rows"]:
+            print(f"  {r['day']:>6.1f}{r['inflow_cfs']:>9}{r['book_cfs']:>8}{r['here_cfs']:>9.1f}{r['diff_cfs']:>8.2f}")
+        print(f"  Largest difference {res['max_abs_diff_cfs']} ft3/s; peak {res['peak_cfs']} ft3/s on day {res['peak_day']}")
+        return
+    if not args.polygon:
+        print("  Give --polygon (the reservoir, a ring of [lon, lat] as JSON), or --check.")
+        sys.exit(1)
+    try:
+        ring = json.loads(args.polygon)
+        storm = json.loads(args.storm) if args.storm else None
+    except json.JSONDecodeError as exc:
+        print(f"  --polygon or --storm is not JSON: {exc}")
+        sys.exit(1)
+    if storm is not None:
+        storm = {"polygon": storm, "rain_mm": args.rain, "duration_h": args.storm_duration,
+                 "runoff_coefficient": args.runoff}
+        if args.rain is None:
+            print("  A storm needs --rain (mm).")
+            sys.exit(1)
+    elif args.peak is None and args.rp is None:
+        print("  Give --peak (m3/s), --rp (years) or --storm.")
+        sys.exit(1)
+    res = rv.route_reservoir(ring, crest_m=args.crest, top_m=args.top, width_m=args.width,
+                             coefficient=args.coefficient, return_period=args.rp, peak_cms=args.peak,
+                             duration_h=args.duration, from_river_id=args.from_river, storm=storm, hours=args.hours,
+                             frames=False)
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        return
+    if not res.get("ok"):
+        print(f"  {res.get('error')}")
+        sys.exit(1)
+    r = res["reservoir"]
+    print(f"  {res['message']}")
+    print(f"  At the dam: in {r['peak_in_cms']:,.0f} m3/s after {r['peak_in_h']:g} h, out {r['peak_out_cms']:,.0f} m3/s "
+          f"after {r['peak_out_h']:g} h ({r['reduction_pct']:g} % lower); {r['flood_storage_m3']:,.0f} m3 held at most.")
+    w = r["without"]
+    if w.get("furthest_peak_cms") is not None:
+        print(f"  Furthest down (reach {w['furthest_river_id']}): {w['furthest_peak_with_cms']:,.0f} m3/s with the "
+              f"reservoir, {w['furthest_peak_cms']:,.0f} m3/s without.")
+    for note in res.get("notes") or []:
+        print(f"  {note}")
+    print(f"  {r['check']}")
+    print(f"  {res['attribution']} {r['terrain_source']}.")
 
 
 def cmd_whatif(args: argparse.Namespace) -> None:
@@ -5160,6 +5221,27 @@ def main() -> None:
     p_rc.add_argument("--lateral", choices=["specific", "none"], default="specific",
                       help="The path's own catchments: area times the tributaries' specific runoff, or nothing")
     p_rc.add_argument("--json", action="store_true")
+    p_rr = route_sub.add_parser("reservoir", help="A flood through a reservoir drawn as a polygon on a river "
+                                "(level-pool routing), and on down the river; --check repeats NEH 630 Example 17-2")
+    p_rr.add_argument("--polygon", default=None, help='The reservoir, a ring of [lon, lat] as JSON')
+    p_rr.add_argument("--crest", type=float, default=15.0, help="The spillway's crest, m above the lowest ground (15)")
+    p_rr.add_argument("--top", type=float, default=None, help="The top of the dam, m above the lowest ground "
+                      "(the crest + 5)")
+    p_rr.add_argument("--width", type=float, default=30.0, help="The spillway's width, m (30)")
+    p_rr.add_argument("--coefficient", type=float, default=None,
+                      help="The weir coefficient, SI (a broad-crested weir, about 1.705)")
+    p_rr.add_argument("--rp", type=float, default=None, help="The T-year flow entering (GEOGLOWS simulated record)")
+    p_rr.add_argument("--peak", type=float, default=None, help="Or a peak flow entering, m3/s")
+    p_rr.add_argument("--duration", type=float, default=24.0, help="Hours the flood enters over (24)")
+    p_rr.add_argument("--from", dest="from_river", type=int, default=None,
+                      help="Route the flood from this reach upstream (default: it enters at the dam's reach)")
+    p_rr.add_argument("--storm", default=None, help="Or a storm over this ring of [lon, lat] (JSON)")
+    p_rr.add_argument("--rain", type=float, default=None, help="The storm's rain, mm")
+    p_rr.add_argument("--storm-duration", type=float, default=6.0, help="The storm's hours (6)")
+    p_rr.add_argument("--runoff", type=float, default=0.3, help="The storm's runoff coefficient (0.3)")
+    p_rr.add_argument("--hours", type=int, default=None)
+    p_rr.add_argument("--check", action="store_true", help="Print the check against NEH 630 Example 17-2")
+    p_rr.add_argument("--json", action="store_true")
     # ── what if, on the map (#565) ───────────────────────────────────
     p_wi = sub.add_parser("whatif", help="A what-if scenario for a river reach's basin (GR4J) and its change carried "
                           "down the river: the Explorer's What if on the map")
