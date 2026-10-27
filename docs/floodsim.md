@@ -363,6 +363,15 @@ bias check above, typed into the flow box. Then:
 - **A breach:** 88 m of the ring's west side, 4 cells, back to the natural ground (12.3 m to 12.5 m), with the flood at
   14.3 m outside: the water comes in through the gap, and 42.49 km² is under water (42.38 km² with the ring whole).
 
+The same from the command line, on the worker's cells of 47 m (`ring.geojson` holds the ring's line):
+
+```bash
+aquascope flood 230567275 --flow 954 --levee ring.geojson --crest 15.1
+```
+
+It runs the valley without and with the levee (2 min 21 s in numpy on an M4 Max) and gives 35.09 km² under water
+before, 34.89 km² after, 0.21 km² kept dry and 0.01 km² newly wet.
+
 | | |
 | --- | --- |
 | ![The swipe: before and after the levee](img/floodsim/levee-swipe-desktop.jpg) | ![The undo log: each line, crest and run](img/floodsim/levee-log-desktop.jpg) |
