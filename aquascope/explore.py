@@ -1648,10 +1648,16 @@ def record_quality_half(
     - ``completeness``: share of the daily calendar between the first and last observation that carries a
       value. The calendar is daily because the catalog and the Archive both report daily values; an
       observation-only series has no holes by construction, so the calendar is what makes a gap visible.
-    - ``longest_gap_days``: the longest gap ``assess_quality`` reports between consecutive observations.
+    - ``longest_gap_days``: the largest step between consecutive observations, in days (a daily record with
+      no missing day is 1, a six-day outage is 7), taken straight from the record's own index.
+      ``assess_quality`` reports the first three gaps it finds in date order, so it cannot be asked for the
+      longest one: three short outages before a long hole would hide the hole.
     - ``flagged_fraction``: share of observations whose ``quality`` flag is provisional or suspect; 0.0
       when ``quality`` is not given.
-    - ``change_points``: the year of a significant Pettitt shift in the annual means, when there is one.
+    - ``change_points``: the year of a Pettitt shift in the calendar years' means, when there is one. A
+      year's mean enters the test only when 330 of its days carry a value, the rule
+      :data:`aquascope.paint.MIN_DAYS` applies to a complete year: the mean of a partial year is the mean of
+      part of a season, so a test over those can report a shift in the record's coverage instead.
 
     ``quality`` is the flag Series the Archive stores next to each value, aligned with ``series``. All four
     values are plain JSON-safe Python numbers and lists. An empty record returns zeros rather than raising,
@@ -1704,11 +1710,20 @@ def record_quality_half(
     if flags is not None:
         observed["quality"] = flags.to_numpy(dtype=object)
     report = assess_quality(observed)
-    longest_gap = max((int(gap["gap_days"]) for gap in report.temporal_gaps), default=0)
+    # The longest gap comes from the index itself, not from ``report.temporal_gaps``: that keeps only the
+    # first three gaps per station in date order, so a record with three short outages before a long hole
+    # used to report the short one (#375).
+    steps = s.index.to_series().diff().dropna()
+    longest_gap = int(steps.max().days) if len(steps) else 0
     flagged_count = report.quality_counts.get("provisional", 0) + report.quality_counts.get("suspect", 0)
     flagged = round(float(flagged_count) / report.n_records, 4) if report.n_records else 0.0
 
-    annual = daily.resample("YS").mean().dropna()
+    # A year's mean is the year's, not its observed months': a year counts only when at least 330 of its
+    # days carry a value, as the map's painting requires of a complete year (#375).
+    from aquascope.paint import MIN_DAYS
+
+    annual_means = daily.resample("YS").mean()
+    annual = annual_means[daily.resample("YS").count() >= MIN_DAYS].dropna()
     points: list[int] = []
     if len(annual) >= 4:
         from aquascope.analysis.changepoint import pettitt_test
@@ -1895,9 +1910,10 @@ def assess_site(
         flagged_by[var] = half["flagged_fraction"]
         record_change_points[var] = list(half["change_points"])
     for var in mirrored:
+        day_word = "day" if longest_gap_by[var] == 1 else "days"
         line = (f"{var.replace('_', ' ').capitalize()} record (local Archive mirror): "
                 f"{completeness_by[var]:.1%} of the days between its first and last observation carry a value, "
-                f"longest gap {longest_gap_by[var]:,} days, "
+                f"longest gap {longest_gap_by[var]:,} {day_word}, "
                 f"{flagged_by[var]:.1%} flagged provisional or suspect")
         if record_change_points[var]:
             line += ", change point in " + ", ".join(str(y) for y in record_change_points[var])

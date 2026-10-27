@@ -258,10 +258,23 @@ def test_record_quality_half_sees_completeness_and_the_long_gap():
     assert complete["completeness"] == 1.0
     assert hole["completeness"] < complete["completeness"]
     assert hole["completeness"] < 0.8
-    assert complete["longest_gap_days"] == 0
+    assert complete["longest_gap_days"] == 1  # a daily record with no missing day: one step of a day
     assert hole["longest_gap_days"] > complete["longest_gap_days"]
     assert hole["longest_gap_days"] > 14 * 365
     assert json.loads(json.dumps(hole)) == hole
+
+
+def test_the_longest_gap_is_the_long_one_after_three_short_ones():
+    """#375 review: three short outages sit before a 14-year hole in date order, and the report said 7 days.
+    The longest gap is the largest step between consecutive observations, taken from the index itself."""
+    whole = _daily_record()
+    gappy = whole.drop(whole.loc["1971-01-01":"1984-12-31"].index)
+    for start in ("1960-03-01", "1963-07-01", "1967-02-01"):
+        gappy = gappy.drop(pd.date_range(start, periods=6))
+    half = explore.record_quality_half(gappy, "discharge")
+    # A 6-day outage is a step of 7 days; the three of them come before the hole.
+    assert half["longest_gap_days"] == (pd.Timestamp("1985-01-01") - pd.Timestamp("1970-12-31")).days
+    assert half["longest_gap_days"] > 14 * 365
 
 
 def test_record_quality_half_reports_the_pettitt_shift_and_flags():
@@ -273,6 +286,26 @@ def test_record_quality_half_reports_the_pettitt_shift_and_flags():
     half = explore.record_quality_half(pd.Series(values, index=index), "discharge", quality=quality)
     assert half["change_points"] == [1991]
     assert half["flagged_fraction"] == round(250 / len(index), 4)
+
+
+def test_a_partial_year_does_not_make_a_change_point():
+    """#375 review: the mean of a partial year is the mean of part of a season, so Pettitt on those means can
+    report a shift in the record's coverage. A record whose first 20 years carry only their winters has no
+    step in it, and a year now counts only when 330 of its days have a value, as paint's complete years do."""
+    index = pd.date_range("1960-01-01", "2019-12-31", freq="D")
+    seasonal = pd.Series(100.0 + 50.0 * np.sin(2 * np.pi * index.dayofyear / 365.25), index=index)
+    winter = index.month.isin([12, 1, 2])
+    partial = seasonal[(index.year >= 1980) | winter]
+
+    from aquascope.analysis.changepoint import pettitt_test
+
+    # What the review is about: the calendar years' means as they stand flag a shift at the coverage change.
+    naive = pettitt_test(partial.resample("YS").mean().dropna())
+    assert naive is not None and naive.timestamp is not None
+
+    half = explore.record_quality_half(partial, "discharge")
+    assert half["completeness"] < 0.8
+    assert half["change_points"] == []
 
 
 def _write_mirror(root, series, quality=None):
@@ -296,7 +329,7 @@ def test_assess_site_fills_the_quality_half_from_a_local_mirror(small_catalog, a
     res = explore.assess_site(51.415, -0.308, problem="flood_risk")
     ctx = res["context"]
     assert ctx["completeness_by_variable"] == {"discharge": 1.0}
-    assert ctx["longest_gap_days"] == {"discharge": 0}
+    assert ctx["longest_gap_days"] == {"discharge": 1}
     assert ctx["flagged_fraction"]["discharge"] == round(100 / len(index), 4)
     assert ctx["change_points"] == {"discharge": [1991]}
     ffa = _row_for(res, "at_site_flood_frequency")
