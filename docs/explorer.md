@@ -547,15 +547,19 @@ a dot opens its card. "Where are floods getting bigger in Europe?" in Ask the ma
 does the same, and undo takes it back. The questions, the methods and the check
 against the single-station trend are in [Paint the globe](paint.md).
 
-## Flood it (spike)
+## Flood it
 
-On a river reach's map card, **Flood it** pours the reach's 100-year flow (or the 2- or 10-year) into it for six
-hours and the water spreads over the terrain on your own GPU (WebGPU; a worker on a coarser grid without it). The
-depth is drawn on the map and the time bar steps through the run. A screening flood: no bathymetry, terrain errors
-of metres. The scheme, its checks against still water, Manning and Ritter's dam break, the comparison with the
-JRC 100-year depth and the speed are in [Flood it](floodsim.md).
+On a river reach's map card, **Flood it** floods the valley at the reach's 100-year flow and draws it on the map. The
+grid follows the river up and down from the click and is cut to its valley; every GEOGLOWS river that enters or starts
+in it is burnt in and fed by its own flow at the same return period, so confluences flood together. The water runs on
+your own GPU (WebGPU; a worker on cells twice as large without it) to a near steady state, frame by frame in the flood
+views' depth colours, and the camera frames it when it settles. The small panel at the side picks the flow (the 2- to
+100-year flow, the forecast peak, a number, or a hydrograph: the 15-day forecast or Route it's wave), and opens the
+run in the flood views: hazard, arrival, a section and what gets flooded. Two runs compare with a swipe. Ask the map
+reads "flood Upton upon Severn at the 100-year flow". A screening flood: no bathymetry, terrain errors of metres. The
+scheme, the checks against JRC's 100-year map at four places and the speed are in [Flood it](floodsim.md).
 
-![Flood it on the Severn](img/floodsim/flood-it-card.png)
+![Flood it on the Severn and the Avon at Tewkesbury](img/floodsim/severn-desktop.png)
 
 ## Map layers
 
