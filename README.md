@@ -386,7 +386,7 @@ Switch to MCMC with `degree>1` for polynomial models, or pass `prior_precision` 
 
 ## 💻 CLI
 
-AquaScope ships a 52-command CLI (`agri`, `basins`, `caravan`, `eval`, `evidence`, `groundwater`, `gym`, `layers`, `playbooks`, `river` and `route` carry subcommands) for the most common workflows:
+AquaScope ships a 53-command CLI (`agri`, `basins`, `caravan`, `eval`, `evidence`, `groundwater`, `gym`, `layers`, `playbooks`, `river` and `route` carry subcommands) for the most common workflows:
 
 ```bash
 # Find stations, then collect data
@@ -440,6 +440,7 @@ aquascope eval score kingston/                       # how the crew did: gates, 
 aquascope eval stats studies/ --by model             # many studies at once: grades, gate failures, cost per study
 aquascope area-study --bbox=-0.9,51.2,0.3,51.8       # a flood study over every gauge in a box: Q100, flood trends, a regional curve
 aquascope paint --bbox=-8,49.8,2,59                    # paint every Archive gauge in a box with its flood trend, plus field significance
+aquascope replay --at 51.95 -2.2 --month 2024-11       # a past flood as a story: rain, gauge vs model, forecast, wave, flood
 
 # Interactive Streamlit dashboard — multipage workspace with 37 live sources,
 # smart auto-insights, and fully interactive Plotly charts
