@@ -149,7 +149,8 @@ export function sparkline(series, { w = 168, h = 64, marker = null } = {}) {
   if (marker && days.includes(marker)) mk = `<line x1="${x(marker).toFixed(1)}" x2="${x(marker).toFixed(1)}" y1="${pad}" y2="${h - pad}" class="rp-mk"/>`;
   return `<svg class="rp-spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Daily flow, observed and modelled">` +
     mk + (mod.length ? `<path d="${path(mod)}" class="rp-mod"/>` : "") + (obs.length ? `<path d="${path(obs)}" class="rp-obs"/>` : "") +
-    `<text x="${w - pad}" y="10" text-anchor="end" class="rp-sv">${n0(hi)} m³/s</text></svg>`;
+    `<text x="${w - pad}" y="10" text-anchor="end" class="rp-sv">${n0(hi)} m³/s</text>` +
+    `<text x="${pad}" y="10" class="rp-sv">${obs.length ? "─ gauge" : ""}${obs.length && mod.length ? "  " : ""}${mod.length ? "- - GEOGLOWS" : ""}</text></svg>`;
 }
 
 /** The forecast stop's chart: the members' range for the peak day as a bar, the median and the observed peak. */
