@@ -1001,6 +1001,30 @@ def replay_event(river_id: int | None = None, lat: float | None = None, lon: flo
     return out
 
 
+def drop_well(wells: list[dict[str, Any]] | None = None, lon: float | None = None, lat: float | None = None,
+              rate_m3_day: float | None = None, days: float = 30.0, transmissivity: float = 500.0,
+              storativity: float = 1e-4, frames: bool = False) -> dict[str, Any]:
+    """The sketchpad's well (#660): drop pumping wells and read the drawdown cone. One well at lon/lat pumping
+    rate_m3_day (1000 by default), or wells, a list of {lon, lat, rate_m3_day} (up to 10), after days of pumping,
+    in a confined aquifer of transmissivity (m2/day; principal aquifers less than 1 to 100,000, Heath 1983) and
+    storativity (most confined aquifers 1e-5 to 1e-3). Theis (1935) for each well, added by superposition. Returns
+    each well's drawdown at its face (0.15 m radius) with its own share and the others', how far the 5 cm line
+    reaches, and the contour lines in lon/lat at 0.05, 0.1, 0.2, 0.5, 1, 2, 5 m ...; frames adds the cone at a
+    series of times. Checked against Fetter's worked example and USGS PP 708's W(u) table. Numbers from code."""
+    from aquascope.sketch import drawdown as dd
+
+    if not wells:
+        if lon is None or lat is None:
+            return {"error": "give lon and lat for one well, or wells: [{lon, lat, rate_m3_day}]"}
+        wells = [{"lon": lon, "lat": lat, "rate_m3_day": rate_m3_day or dd.DEFAULTS["rate_m3_day"]}]
+    try:
+        res = dd.drawdown_map(wells, days=days, transmissivity=transmissivity, storativity=storativity,
+                              frames=frames, image=False)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return res
+
+
 def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None) -> dict[str, Any]:
     """Route it (#656): a storm over polygon (a ring of [lon, lat]) of rain_mm over duration_h hours, a plain
@@ -1845,6 +1869,7 @@ def build_server():
     server.tool()(flood_reach)
     server.tool()(replay_candidates)
     server.tool()(replay_event)
+    server.tool()(drop_well)
     server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)

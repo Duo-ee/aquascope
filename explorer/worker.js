@@ -1956,6 +1956,34 @@ json.dumps(_out, default=str)
   }
 }
 
+// ── Drop a well (#660): aquascope.sketch.drawdown, the same functions as `aquascope well` and the MCP tool
+// drop_well. Type "well" (the main worker: the well function is scipy's exp1): op "map" draws the cone of the wells
+// on the map (contours, the fill's grid, each well's drawdown at its face, and with frames the cone at a series of
+// times for the time bar); op "point" gives the drawdown at a point with each well's share.
+async function wellOp({ id, op, args }) {
+  pyodide.globals.set("_wl_args", JSON.stringify({ op: String(op || "map"), args: args || {} }));
+  const code = `
+import json
+from aquascope.sketch import drawdown as _wl
+_a = json.loads(_wl_args)
+_k = dict(_a["args"])
+try:
+    if _a["op"] == "map":
+        _out = _wl.drawdown_map(_k.pop("wells"), **_k)
+    elif _a["op"] == "point":
+        _out = _wl.drawdown_at(_k.pop("lon"), _k.pop("lat"), _k.pop("wells"), **_k)
+    elif _a["op"] == "check":
+        _out = _wl.check()
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, TypeError, KeyError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+json.dumps(_out)
+`;
+  const out = await pyodide.runPythonAsync(code);
+  post("result", { id, result: JSON.parse(out) });
+}
+
 self.onmessage = async (e) => {
   const m = e.data;
   try {
@@ -1998,6 +2026,7 @@ self.onmessage = async (e) => {
     if (m.type === "reservoir") return await reservoirOp(m);
     if (m.type === "floodsim") return await floodsimOp(m);
     if (m.type === "replay") return await replayOp(m);
+    if (m.type === "well") return await wellOp(m);
     if (m.type === "groundwater") return await groundwater(m);
     if (m.type === "gw_layers") return await gwLayers(m);
   } catch (err) {

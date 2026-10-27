@@ -540,6 +540,14 @@ you drew. **Draw a storm** (#670) takes an area you draw, a rain depth, its hour
 runoff coefficient, and plays the runoff's wave down every river below on the time bar, with
 the hydrographs and the mass balance on its card. See [the sketchpad](sketchpad.md).
 
+**Drop a well** (#660) drops a pumping well where you click and draws its drawdown cone round it as contour lines;
+drop more and they add, drag one and the cone follows, play the cone growing on the time bar, and open a well's card
+for its numbers (and, over your MODFLOW model, what the model's well cell would read). Ask the map reads "drop a well
+at Lyon pumping 2000 m3/day". Theis with superposition, checked against Fetter's worked example and USGS PP 708's
+table of W(u).
+
+![Drop a well: two cones near Lyon](img/sketchpad/well-two-desktop.jpg)
+
 ## Paint this view
 
 The brush in the map tools paints one question at every gauge in view that the

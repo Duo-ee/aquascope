@@ -69,6 +69,7 @@ export function slotOf(action, id) {
     case "replay": return "replay";          // one replay on the map at a time (#659); a new one replaces it
     // a levee or a breach on Flood it's grid (#663): each drawn line its own slot, kept across its edits
     case "draw_levee": case "draw_breach": return `sketch:${action.sketch ?? id}`;
+    case "drop_well": return "wells";        // the wells on the map, one value (#660); undo puts the last one back
     case "draw_storm": return "storm";       // the storm's area (#670); its run is a route, one wave at a time
     case "draw_reservoir": return "reservoir";   // the lake drawn (#662); its run is a route too
     default: return null;

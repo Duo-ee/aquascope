@@ -43,6 +43,7 @@ from aquascope.map_layers import STATUS_CLASSES
 __all__ = [
     "ACTION_TYPES", "BASEMAPS", "DIRECTIONS", "EXAMPLES", "LAYERS", "PHOTON_URL", "PLACE_CREDIT", "REGIONS",
     "FLOOD_DEFAULT_RP", "FLOOD_FLOWS", "ROUTE_DEFAULT_RP", "SKETCH_LIMITS", "ROUTE_LIMITS", "ROUTE_SHAPES",
+    "WELL_LIMITS",
     "STORM_DEFAULTS", "STORM_LIMITS", "RESERVOIR_DEFAULTS", "RESERVOIR_LIMITS",
     "action_schema", "describe_action", "model_command", "model_prompt", "parse_command", "parse_model_reply",
     "reply_schema", "resolve_actions", "resolve_place", "validate_action", "validate_actions",
@@ -55,6 +56,7 @@ ACTION_TYPES = (
     "flood_reach",
     "draw_levee", "draw_breach",
     "replay",
+    "drop_well",
     "draw_storm",
     "draw_reservoir",
 )
@@ -72,6 +74,11 @@ FLOOD_RETURN_PERIODS = (2.0, 500.0)
 #: above mean sea level, a freeboard above the highest flood along the line in m.
 SKETCH_LIMITS = {"points": 200, "level_m": (-100.0, 9000.0), "freeboard_m": (0.0, 20.0)}
 SKETCHES = ("draw_levee", "draw_breach")
+#: Drop a well (#660): the bounds a drop_well action is held to (aquascope.sketch.drawdown.LIMITS; a test keeps
+#: them equal, and this module stays importable without scipy, in the light worker).
+WELL_LIMITS = {"rate_m3_day": (0.1, 1_000_000.0), "days": (0.001, 36_500.0),
+               "transmissivity_m2_day": (0.01, 1_000_000.0), "storativity": (1e-7, 0.5)}
+WELL_DEFAULT_RATE = 1000.0
 #: Draw a storm (#670): a storm's rain in mm, its hours and its runoff coefficient, the points its outline may
 #: have, and what is used when the words do not say (aquascope.routing.route_storm's own defaults).
 STORM_LIMITS = {"rain_mm": (0.0, 2000.0), "duration_h": (0.0, 720.0), "runoff_coefficient": (0.0, 1.0),
@@ -366,6 +373,11 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                                                                          "above the highest flood along the line"},
                         "invert": {"type": "number", "description": "draw_breach: the gap's floor, m above mean "
                                                                     "sea level (none: the natural ground)"},
+                        "rate_m3_day": {"type": "number", "description": "drop_well: the pumping rate, m3/day, "
+                                                                          "only when the reader gave it"},
+                        "days": {"type": "number", "description": "drop_well: days of pumping"},
+                        "transmissivity": {"type": "number", "description": "drop_well: m2/day, only when given"},
+                        "storativity": {"type": "number", "description": "drop_well: dimensionless, only when given"},
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
@@ -668,6 +680,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
         return _validate_sketch(action, out)
     if kind == "replay":
         return _validate_replay(action, out, place, t)
+    if kind == "drop_well":
+        return _validate_well(action, out, place)
     if kind == "draw_storm":
         return _validate_storm(action, out, place)
     if kind == "draw_reservoir":
@@ -977,6 +991,36 @@ def _validate_sketch(action: dict[str, Any], out: dict[str, Any]) -> tuple[dict[
     return out, None
 
 
+def _validate_well(action: dict[str, Any], out: dict[str, Any], place: str | None
+                   ) -> tuple[dict[str, Any] | None, str | None]:
+    """Drop a well (#660): where (a point, a place, or ``at: center``, the middle of the map) and, when the reader
+    gave them, the rate (m3/day), the days of pumping and the aquifer (transmissivity, storativity). The well joins
+    the wells already on the map; the map computes the cone (aquascope.sketch.drawdown)."""
+    point = _latlon(action.get("lat"), action.get("lon"))
+    if point:
+        out["lat"], out["lon"] = point
+    elif place:
+        out["place"] = place
+    elif action.get("at") in (None, "here", "center"):
+        out["at"] = "center"
+    else:
+        return None, "drop_well needs a place, a lat and lon, or at: center"
+    for key, limit in (("rate_m3_day", "rate_m3_day"), ("days", "days"),
+                       ("transmissivity", "transmissivity_m2_day"), ("storativity", "storativity")):
+        v = action.get(key)
+        if v is None:
+            continue
+        lo, hi = WELL_LIMITS[limit]
+        if not _finite(v) or not lo <= float(v) <= hi:
+            return None, f"drop_well's {key} must be a number from {lo:g} to {hi:g}"
+        out[key] = round(float(v), 9 if key == "storativity" else 3)
+    out.setdefault("rate_m3_day", WELL_DEFAULT_RATE)
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
 def validate_actions(actions: Any, today: str | date | None = None) -> dict[str, Any]:
     """Check a list of actions: ``{"actions": [the ones that passed], "errors": [why the others did not]}``."""
     if isinstance(actions, dict):
@@ -1085,6 +1129,12 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             top = f", down to {float(a['invert']):g} m" if a.get("invert") is not None else ""
         return f"Draw {what} {where}{top}, and flood again"
+    if kind == "drop_well":
+        where = a.get("label") or a.get("place") or ("the middle of the map" if a.get("at") == "center" else
+                                                     f"{a.get('lat'):.3f}, {a.get('lon'):.3f}")
+        q = float(a.get("rate_m3_day") or WELL_DEFAULT_RATE)
+        days = f" for {float(a['days']):g} days" if a.get("days") is not None else ""
+        return f"Drop a well at {where} pumping {q:,.0f} m³/day ({q / 86.4:.3g} L/s){days}"
     if kind == "draw_storm":
         if a.get("place") or a.get("label"):
             where = a.get("label") or a.get("place")
@@ -1589,6 +1639,47 @@ def _sketch_phrase(c: _Clause) -> None:
     c.add(kind, action)
 
 
+_WELL_RATE = (r"(?P<q>\d[\d,]*(?:\.\d+)?)\s*(?P<u>m3/day|m3/d|m³/day|m³/d|m3 a day|m3 per day|"
+              r"cubic met(?:re|er)s? (?:a|per) day|l/s|lps|litres? (?:a|per) second|liters? (?:a|per) second)")
+_WELL_SPAN = (r"for\s+(?P<n>\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s*"
+              r"(?P<per>days?|weeks?|months?|years?)")
+
+
+def _well_phrase(c: _Clause) -> None:
+    """Drop a well (#660): "drop a well here", "drop a well at Lyon pumping 2000 m3/day", "drill a borehole near
+    Lille pumping 20 l/s for 90 days", "pump 1500 m3/day here for a year". The rate and the days only when said."""
+    m = re.search(r"^(?:drop|put|add|place|drill|sink|dig)\s+(?:a\s+|an\s+|another\s+|one\s+)?(?:pumping\s+)?"
+                  r"(?:well|borehole|bore ?hole)\b(?P<tail>.*)$", c.text)
+    if not m:
+        m = re.search(r"^pump\s+(?P<tail>(?:at\s+)?" + _WELL_RATE + r".*)$", c.text)
+    if not m:
+        return
+    tail = m.group("tail").strip()
+    action: dict[str, Any] = {"type": "drop_well"}
+    q = re.search(r"(?:(?:pumping|that pumps|at|of|with)\s+)?" + _WELL_RATE, tail)
+    if q:
+        v = float(q.group("q").replace(",", ""))
+        action["rate_m3_day"] = round(v * 86.4, 3) if q.group("u") in ("l/s", "lps") or "second" in q.group("u") \
+            else v
+        tail = (tail[:q.start()] + " " + tail[q.end():]).strip()
+    d = re.search(_WELL_SPAN, tail)
+    if d:
+        n = d.group("n")
+        num = float(n) if re.match(r"\d", n) else float(_WORD_NUMBERS.get(n, 1))
+        per = {"d": 1.0, "w": 7.0, "m": 30.0, "y": 365.0}[d.group("per")[0]]
+        action["days"] = round(num * per, 3)
+        tail = (tail[:d.start()] + " " + tail[d.end():]).strip()
+    tail = re.sub(r"\s+", " ", tail).strip(" ,")
+    where = re.fullmatch(r"(?:(?:at|in|near|on|by)\s+)?(?P<p>.+)", tail) if tail else None
+    p = where.group("p").strip() if where else ""
+    if not p or p in ("here", "this point", "the centre", "the center", "the middle", "the map", "this spot"):
+        action["at"] = "center"
+    else:
+        action["place"] = _place_text(_raw_span(c, p))
+    c.text = ""
+    c.add("drop_well", action)
+
+
 def _river_phrase(c: _Clause) -> None:
     patterns = [
         (r"^(?:show(?: me)?\s+)?(?:the\s+)?(?:way|path|route)\s+(?:of|from)\s+(?:the\s+)?(?P<p>.+?)"
@@ -1777,7 +1868,7 @@ def _place_phrase(c: _Clause) -> None:
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
                                       "highlight_river", "route", "flood_reach", "draw_levee", "draw_breach",
-                                      "replay",
+                                      "drop_well", "replay",
                                       "draw_storm", "draw_reservoir",
                                       "add_pin", "paint"))}
 
@@ -1788,7 +1879,7 @@ def _parse_clause(raw: str, today: date) -> _Clause:
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
     for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _replay_phrase, _sketch_phrase,
-                 _storm_phrase, _reservoir_phrase,
+                 _well_phrase, _storm_phrase, _reservoir_phrase,
                  _area_phrase, _flood_phrase, _route_phrase, _river_phrase):
         step(c)
         if c.actions:
@@ -2123,6 +2214,11 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 notes.append(f"{a['place']} has no position to start the river from")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
+        elif a["type"] == "drop_well":
+            if hit.get("lat") is None:
+                notes.append(f"{a['place']} has no position for a well")
+                continue
+            b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
         elif a["type"] in ("route", "flood_reach", "replay"):
             if hit.get("lat") is None:
                 notes.append(f"{a['place']} has no position to start the flood from")
@@ -2264,6 +2360,9 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         'forecast said, the wave downstream, a screening flood). "place" (a river or a town; or "lat" and "lon", or '
         '"at": "here") and "month" (YYYY-MM). The map lists the floods it has there that month and takes the most '
         'reported; "pick" (2 to 5) only when the reader asked for another. The map writes the story and every number.',
+        '- drop_well: drop a pumping well and draw its drawdown cone (Theis). "place" (or "lat" and "lon", or "at": '
+        '"center" for the middle of the map); "rate_m3_day" only when the reader gave a rate (L/s times 86.4); "days", '
+        '"transmissivity" (m2/day) and "storativity" only when given. The map computes the cone and every number.',
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "

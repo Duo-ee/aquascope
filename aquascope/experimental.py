@@ -20,8 +20,9 @@ What is here and why (``docs/stability.md`` has the full policy):
   and the MCP tool ``flood_reach``, new in 1.1.
 * Replay an event (#659): ``aquascope.replay`` (a past flood assembled from its data and told as a story),
   ``aquascope replay`` and the MCP tools ``replay_candidates`` and ``replay_event``, new in 1.1.
-* The sketchpad (#664): ``aquascope.sketch``; a drawn reservoir (#662: ``aquascope.sketch.reservoir``,
-  ``aquascope route reservoir`` and the MCP tool ``route_reservoir``), new in 1.1.
+* The sketchpad (#664): ``aquascope.sketch``. Drop a well (#660): ``aquascope.sketch.drawdown`` (Theis with
+  superposition), ``aquascope well`` and the MCP tool ``drop_well``; a drawn reservoir (#662:
+  ``aquascope.sketch.reservoir``, ``aquascope route reservoir`` and the MCP tool ``route_reservoir``), new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -100,6 +101,7 @@ CLI: tuple[str, ...] = (
     "warnings",
     "watch",
     "waterbalance",
+    "well",
     "whatif",
 )
 
@@ -114,6 +116,7 @@ MCP_TOOLS: tuple[str, ...] = (
     "correct_to_gauge",
     "dated_layers",
     "downstream_ids",
+    "drop_well",
     "engineering_export",
     "explain_view",
     "flood_depth_overlay",

@@ -2,6 +2,7 @@
 
 Each tool is one module, a plain function the Explorer, the CLI, the MCP server and Ask the map share:
 
+* :mod:`aquascope.sketch.drawdown`: drop pumping wells and see the drawdown cone (Theis, with superposition; #660).
 * :mod:`aquascope.sketch.reservoir`: draw a reservoir on a river and see it flatten a flood (level-pool,
   storage-indication routing; #662).
 

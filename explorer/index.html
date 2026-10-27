@@ -36,6 +36,7 @@
         </div>
       </section>
   <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./well.css?v=__BUILD__" />
 </head>
 <body class="panel-collapsed">
   <a class="skip" href="#panel">Skip to the results panel</a>
@@ -419,6 +420,46 @@
             <button id="rt-edit" type="button" class="link-btn wi-edit">Change the flood</button>
           </div>
         </div>
+      </section>
+      <!-- Drop a well (#660): the drawdown cone of pumping wells (Theis, superposition); src/well-map.js, well.css -->
+      <section id="well" class="whatif well" aria-labelledby="wl-title" hidden>
+        <header class="wi-head">
+          <div>
+            <p class="wi-kicker">Drop a well</p>
+            <h2 id="wl-title" class="wi-title">Drawdown cone</h2>
+            <p class="wi-sub">Theis, several wells added; drag a well to move it</p>
+          </div>
+          <button type="button" class="wi-close wl-close" aria-label="Close Drop a well" title="Close (Esc)">×</button>
+        </header>
+        <div id="wl-empty" class="wl-empty">
+          <p>Click the map where a well pumps, and its cone is drawn round it.</p>
+          <label class="wl-q">New well pumps <input id="wl-rate-new" type="number" min="1" step="any" inputmode="decimal" value="1000" aria-label="New well's rate, m³/day" /> m³/day</label>
+          <button id="wl-place" type="button" class="btn small primary">Drop a well</button>
+        </div>
+        <div id="wl-result" class="wi-result" hidden>
+          <p id="wl-head" class="rt-head"></p>
+          <ol id="wl-wells" class="wl-wells" aria-label="The wells: rate and drawdown at the face"></ol>
+          <div class="wl-row"><button id="wl-add" type="button" class="link-btn">Add a well</button>
+            <button id="wl-play" type="button" class="link-btn">Play the cone growing</button></div>
+        </div>
+        <form id="wl-form" class="wi-form wl-form" onsubmit="return false">
+          <label class="wi-slider"><span>T</span>
+            <input id="wl-t" type="range" min="0" max="1000" step="1" aria-label="Transmissivity, m²/day" />
+            <output id="wl-t-out" for="wl-t">500 m²/day</output></label>
+          <label class="wi-slider"><span>S</span>
+            <input id="wl-s" type="range" min="0" max="1000" step="1" aria-label="Storativity" />
+            <output id="wl-s-out" for="wl-s">1e-4</output></label>
+          <label class="wi-slider"><span>After</span>
+            <input id="wl-days" type="range" min="0" max="1000" step="1" aria-label="Days of pumping" />
+            <output id="wl-days-out" for="wl-days">30 days</output></label>
+          <p id="wl-odd" class="wl-odd" hidden></p>
+        </form>
+        <p id="wl-status" class="wi-status" role="status" hidden></p>
+        <p class="wi-model">Theis (1935), wells added. Checked against Fetter's worked example and USGS PP 708.</p>
+        <details class="wl-how"><summary>Method, assumptions, defaults</summary>
+          <p id="wl-model" class="wl-src">Defaults: 1000 m³/day, T 500 m²/day, S 1e-4, 30 days.</p>
+          <p id="wl-src" class="wl-src"></p></details>
+        <div class="wi-foot"><button id="wl-clear" type="button" class="link-btn">Take the wells off</button></div>
       </section>
       <!-- Draw a storm (#670): rain on a drawn area, routed down the rivers on the time bar; src/storm-map.js -->
       <section id="storm" class="whatif route storm" aria-labelledby="st-title" hidden>

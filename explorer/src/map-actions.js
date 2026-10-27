@@ -448,6 +448,13 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       if (!s) throw new Error("no line was drawn");
       return log.live().slice(-1)[0];
     }
+    case "drop_well": {
+      // Drop a well (#660): well-map.js adds it to the wells on the map, computes the cone (aquascope.sketch.drawdown
+      // in the worker) and logs the wells with what they replaced; nothing to log here.
+      if (!actions.dropWell) throw new Error("Drop a well is not on this page");
+      await actions.dropWell(a, { by, command, label });
+      return log.live().slice(-1)[0];
+    }
     case "draw_storm": {
       // Draw a storm (#670): storm-map.js takes the area (the words', the one on the map, or one the reader draws),
       // logs it, routes the storm and logs the run as a route; nothing to log here.
@@ -593,6 +600,7 @@ const ICON = {
   route: '<path d="M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/><path d="M6 9c1.5-3 3-4 4.5-4S13 7 14 9s2.5 3 4 2"/>',
   flood_reach: '<path d="M3 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M3 19c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2 1 3 1"/><path d="M12 3v7M9 7l3 3 3-3"/>',
   draw_levee: '<path d="M3 17h18"/><path d="M5 17l3-6h8l3 6"/><path d="M3 21c2.5 0 2.5-1.5 5-1.5S10.5 21 13 21"/>',
+  drop_well: '<path d="M12 3v13"/><path d="M9 6h6"/><path d="M3 12c3 0 5 1 7 5h4c2-4 4-5 7-5"/><path d="M3 20h18"/>',
   draw_storm: '<path d="M7 15a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 9 3 3 0 0 1 18 15Z"/><path d="M8 18l-1 2.5M12 18l-1 2.5M16 18l-1 2.5"/>',
   draw_reservoir: '<path d="M3 18c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5"/><path d="M4 13c4-1 6-4 8-8 2 4 4 7 8 8"/><path d="M12 5v8"/>',
   draw_breach: '<path d="M3 17h7M14 17h7"/><path d="M5 17l3-6h2M14 11h2l3 6"/><path d="M11 13l1 4 1-4"/>',
