@@ -463,7 +463,8 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
           peak_cms: float | None = None, return_period: float | None = None, duration_h: float = 24.0,
           shape: str = "triangle", hours: int | None = None, max_reaches: int = MAX_PATH,
           along: bool = True, places: list[dict[str, Any]] | None = None, frames: bool = True,
-          stations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+          stations: list[dict[str, Any]] | None = None, inflow_cms: list[float] | None = None,
+          inflow_source: str | None = None) -> dict[str, Any]:
     """A flood wave from a reach down its river to the sea: what arrives where, when, and how flat.
 
     Water enters at the downstream end of ``river_id`` (or the reach snapped at ``lat``/``lon``): a hydrograph
@@ -478,12 +479,25 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
     (:func:`aquascope.rivers.trace_downstream`) and ``places`` lists the Archive gauges on it and any ``places``
     given (``[{"name", "lat", "lon"}]``, towns for example) with the wave where they stand. ``frames`` is the
     animation for the map (each reach's flow as a share of the peak that entered, every few hours).
+
+    ``inflow_cms`` replaces the made-up hydrograph with a real one (#659): the flow leaving the reach, one value an
+    hour from the first (m3/s), routed for as many hours as it has (``hours`` at most) with every reach on the path
+    starting at its first value, so a river already in flow does not fill from empty. ``inflow_source`` says where
+    the series came from. The answer is then the flow that water alone brings down the path.
     """
     import numpy as np
 
     from aquascope import rivers
 
-    d, h = _check_inputs(duration_h, hours, shape)
+    series_in = None
+    if inflow_cms is not None:
+        series_in = np.asarray([float(v) for v in inflow_cms], dtype=float)
+        if not (2 <= len(series_in) <= MAX_HOURS + 1) or not np.all(np.isfinite(series_in)) or series_in.min() < 0:
+            raise ValueError(f"inflow_cms must be 2 to {MAX_HOURS + 1} hourly flows, none negative")
+        duration_h, shape = float(len(series_in) - 1), "series"
+        d, h = duration_h, (None if hours in (None, "", 0) else min(int(hours), len(series_in) - 1))
+    else:
+        d, h = _check_inputs(duration_h, hours, shape)
     snap = None
     if river_id is None:
         if lat is None or lon is None:
@@ -493,9 +507,14 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
             return {"ok": False, "error": snap["message"], "snap": snap, "attribution": ATTRIBUTION}
         river_id = snap["river_id"]
     rid = rivers._river_id(river_id)
-    if peak_cms is None and return_period is None:
+    if series_in is None and peak_cms is None and return_period is None:
         raise ValueError("give peak_cms (m3/s) or return_period (years)")
-    if peak_cms is not None:
+    if series_in is not None:
+        peak = float(series_in.max())
+        if peak <= 0:
+            raise ValueError("inflow_cms has no flow in it")
+        source = inflow_source or f"a hydrograph of {len(series_in) - 1} h, peaking at {peak:,.0f} m³/s"
+    elif peak_cms is not None:
         peak = float(peak_cms)
         if not (0 < peak <= 1e6):
             raise ValueError("peak_cms must be above 0 and at most 1,000,000 m3/s")
@@ -519,9 +538,16 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
         path.append(nxt)
     truncated = len(path) >= int(max_reaches) and int(ds_index[path[-1]]) >= 0
     k_path = float(np.sum(k[path[1:]])) if len(path) > 1 else 0.0
-    n_steps = h if h is not None else _auto_hours(d, k_path)
-    q_in = hydrograph(peak, d, n_steps, shape=shape)
-    routed = route_network(path, ds_index, k, x, n_steps, outflow={i0: q_in}) if len(path) > 1 else {i0: q_in}
+    if series_in is not None:
+        n_steps = h if h is not None else len(series_in) - 1
+        q_in = series_in[: n_steps + 1]
+        start_q = {i: float(q_in[0]) for i in path}
+    else:
+        n_steps = h if h is not None else _auto_hours(d, k_path)
+        q_in = hydrograph(peak, d, n_steps, shape=shape)
+        start_q = None
+    routed = (route_network(path, ds_index, k, x, n_steps, outflow={i0: q_in}, q0=start_q) if len(path) > 1
+              else {i0: q_in})
     ids = [int(net.ids[i]) for i in path]
     series = [routed[i] for i in path]
     rows = _reach_rows(ids, series, peak, DT_S, n_steps)
@@ -573,7 +599,8 @@ def _message(res: dict[str, Any]) -> str:
     inflow = res["inflow"]
     f = res["furthest"]
     reached = sum(1 for r in res["reaches"] if r["reached"])
-    head = (f"A {inflow['shape']} of {inflow['peak_cms']:,.0f} m³/s over {inflow['duration_h']:g} h from reach "
+    what = ("A hydrograph peaking at" if inflow["shape"] == "series" else f"A {inflow['shape']} of")
+    head = (f"{what} {inflow['peak_cms']:,.0f} m³/s over {inflow['duration_h']:g} h from reach "
             f"{res['river_id']}, routed {res['hours']} h down {reached:,} reaches.")
     if f["index"] == 0:
         return head + " It does not get past the first reach in the hours routed."
