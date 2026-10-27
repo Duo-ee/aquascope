@@ -533,6 +533,21 @@ it down every river below; the MCP tools `route_flood` and `route_storm` return 
 JSON. In the browser a 2,000 m³/s flood from Basel routes in about 20 s, engine start and the
 trace included, measured in headless Chrome.
 
+## The sketchpad
+
+The pencil in the map tools opens the sketchpad: tools that draw on the map and compute on what
+you drew. **Draw a storm** (#670) takes an area you draw, a rain depth, its hours and a plain
+runoff coefficient, and plays the runoff's wave down every river below on the time bar, with
+the hydrographs and the mass balance on its card. See [the sketchpad](sketchpad.md).
+
+**Drop a well** (#660) drops a pumping well where you click and draws its drawdown cone round it as contour lines;
+drop more and they add, drag one and the cone follows, play the cone growing on the time bar, and open a well's card
+for its numbers (and, over your MODFLOW model, what the model's well cell would read). Ask the map reads "drop a well
+at Lyon pumping 2000 m3/day". Theis with superposition, checked against Fetter's worked example and USGS PP 708's
+table of W(u).
+
+![Drop a well: two cones near Lyon](img/sketchpad/well-two-desktop.jpg)
+
 ## Paint this view
 
 The brush in the map tools paints one question at every gauge in view that the
@@ -583,17 +598,6 @@ number in a note is written by code from the data. The pieces, the story format 
 Severn in Storm Bert and the French Broad in Hurricane Helene) are in [Replay an event](replay.md).
 
 ![Replay: the gauge at Saxons Lode against GEOGLOWS, November 2024](img/replay/severn-gauge-desktop.jpg)
-
-## The sketchpad
-
-Draw on the map and a small, checked model recomputes. **Drop a well** (the pump mark in the map tools): click the map
-and the well's drawdown cone is drawn round it as contour lines; drop more and they add, drag one and the cone
-follows, play the cone growing on the time bar, and open a well's card for its numbers (and, over your MODFLOW model,
-what the model's well cell would read). Ask the map reads "drop a well at Lyon pumping 2000 m3/day". Theis with
-superposition, checked against Fetter's worked example and USGS PP 708's table of W(u). See
-[The sketchpad](sketchpad.md).
-
-![Drop a well: two cones near Lyon](img/sketchpad/well-two-desktop.jpg)
 
 ## Map layers
 

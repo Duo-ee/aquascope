@@ -60,6 +60,8 @@ import { initWhatIf } from "./src/whatif-map.js?v=__BUILD__";  // What if, on th
 import { initRoute } from "./src/route-map.js?v=__BUILD__";  // Route it (#656)
 import { initWell } from "./src/well-map.js?v=__BUILD__";  // Drop a well (#660)
 import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
+import { initSketchMenu } from "./src/sketch-menu.js?v=__BUILD__";  // the sketchpad's tools (#664)
+import { initStorm } from "./src/storm-map.js?v=__BUILD__";  // Draw a storm (#670)
 import { initFloodIt } from "./src/floodsim-map.js?v=__BUILD__";  // Flood it, a screening flood on the GPU (#658)
 import { initReplay } from "./src/replay.js?v=__BUILD__";  // Replay an event, a past flood as a story (#659)
 
@@ -219,9 +221,11 @@ function bringMapOnline(url) {
   initWhatIf();       // its slot in the action log (#565)
   initRoute();        // its slot in the action log (#656)
   initPaint();        // Paint this view, and its slot in the action log (#657)
+  initSketchMenu();   // the sketchpad's menu (#664); each tool adds itself
+  initStorm();        // Draw a storm (#670), after Route it: its wave is drawn there
   initFloodIt();      // Flood it on the reach card, and its slot in the action log (#658)
   initReplay();       // Replay on the reach card and in Floods past, a #rp= link, its slot in the log (#659)
-  initWell();         // Drop a well in the map tools, and its slot in the action log (#660)
+  initWell();         // Drop a well in the sketchpad menu, and its slot in the action log (#660)
   // A selection made while the map was still dark has nothing on the map yet.
   if (state.selected) {
     highlightStation(`${state.selected.source}/${state.selected.station_id}`);

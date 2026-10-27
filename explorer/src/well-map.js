@@ -1,4 +1,4 @@
-// Drop a well (#660), on the map. The well tool in the map tools drops a pumping well where you click; the drawdown
+// Drop a well (#660), on the map. Drop a well in the sketchpad's menu drops a pumping well where you click; the drawdown
 // cone is drawn round it as contour lines at round levels (5 cm out to the deepest) over a fill, recomputed as you
 // drag a well, change its rate, the aquifer or the days. Several wells add (superposition). The cone grows on the
 // time bar ("Play the cone growing"). A card on a well gives its drawdown, its own share and the others', and, when
@@ -16,6 +16,7 @@ import { logAction, registerSlotWriter, slotValue } from "./map-actions.js?v=__B
 import { releaseModelClock, setModelStep, useModelClock } from "./time-ui.js?v=__BUILD__";
 import { modflowContext } from "./groundwater-view.js?v=__BUILD__";
 import { call } from "./worker-client.js?v=__BUILD__";
+import { registerSketchTool } from "./sketch-menu.js?v=__BUILD__";
 import {
   DEFAULTS, LEVEL_COLORS, MAX_WELLS, SPANS, TYPICAL, addWell, contourFeatures, corners, daysWords, distWords,
   editWell, fillPixels, frameLabel, fromSlider, headline, logLabel, mapArgs, metres, modflowCellAt, modflowWords,
@@ -274,14 +275,11 @@ function startPlacing() {
   bar.append(cancel);
   overlay.append(tip, bar);
   wrap.appendChild(overlay);
-  const btn = $("btn-well");
-  if (btn) btn.setAttribute("aria-pressed", "true");
   return new Promise((resolve) => {
     let down = null;
     const finish = (ll) => {
       if (!placing) return;
       placing = null;
-      if (btn) btn.setAttribute("aria-pressed", "false");
       overlay.classList.add("done");
       overlay.replaceChildren();
       setTimeout(() => overlay.remove(), 400);
@@ -568,9 +566,10 @@ export function initWell() {
   if (!p) return;
   registerSlotWriter("wells", (v) => paint(v || null));
   registerRow();
-  $("btn-well").addEventListener("click", () => {
-    if (placing) { placing.finish(null); return; }
-    void placeOne();
+  registerSketchTool({
+    id: "well", label: "Drop a well", hint: "The drawdown cone of a pumping well (Theis)",
+    icon: '<path d="M12 3v13"/><path d="M9 6h6"/><path d="M3 12c3 0 5 1 7 5h4c2-4 4-5 7-5"/><path d="M3 20h18"/>',
+    run: () => { if (placing) placing.finish(null); else void placeOne(); },
   });
   $("wl-add").addEventListener("click", () => void placeOne());
   $("wl-place").addEventListener("click", () => void placeOne());
