@@ -124,3 +124,21 @@ export function exposureChangeFeatures(c) {
   }
   return { type: "FeatureCollection", features: feats };
 }
+
+/**
+ * The cells where two runs on the same grid differ (wet in one only, or deeper by more than `tol` m), as a box
+ * { r0, r1, c0, c1 } padded by `pad` cells and kept on the grid; null when they do not differ. Before and after is
+ * counted inside it, so the open sources are read only where the levee or the breach changed the flood.
+ */
+export function changeBox(a, b, nx, ny, { wet = 0.05, tol = 0.05, pad = 12 } = {}) {
+  let r0 = ny, r1 = -1, c0 = nx, c1 = -1;
+  for (let i = 0; i < a.length; i++) {
+    const wa = a[i] > wet, wb = b[i] > wet;
+    if (wa === wb && (!wa || Math.abs(a[i] - b[i]) <= tol)) continue;
+    const r = Math.floor(i / nx), c = i - r * nx;
+    if (r < r0) r0 = r; if (r > r1) r1 = r;
+    if (c < c0) c0 = c; if (c > c1) c1 = c;
+  }
+  if (r1 < 0) return null;
+  return { r0: Math.max(0, r0 - pad), r1: Math.min(ny - 1, r1 + pad), c0: Math.max(0, c0 - pad), c1: Math.min(nx - 1, c1 + pad) };
+}

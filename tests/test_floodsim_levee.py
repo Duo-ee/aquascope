@@ -208,12 +208,15 @@ FIXTURE = Path(__file__).parent / "fixtures" / "floodsim_twin_levee.json"
 
 
 def _levee_fixture_grid() -> tuple[dict, list]:
-    g = _grid(_basin(24, 30))
-    g["edges"]["e"][10:14] = 0.002                      # a normal-depth outfall on the east side
-    line = [_ll(g, -1.0, 27.2), _ll(g, 25.0, 3.9)]
-    e = fs.edit_grid(g, [{"kind": "levee", "line": line, "crest": 10.7},
-                         {"kind": "breach", "line": [_ll(g, 11.2, 15.0), _ll(g, 12.8, 13.4)], "invert": 9.9}])
-    return e, [[2, 2, 6.0], [3, 5, [0.0, 4.0, 2.0]]]
+    """A valley running east down its middle row, a levee across its north side at an angle with a breach in it, a
+    normal-depth outfall at the foot, and two inflows (one a table)."""
+    rows, cols = np.mgrid[0:24, 0:30]
+    g = _grid(12.0 - 0.03 * cols + 0.08 * np.abs(rows - 12))
+    g["edges"]["e"][9:16] = 0.0013
+    line = [_ll(g, 1.2, 4.6), _ll(g, 9.4, 26.3)]
+    e = fs.edit_grid(g, [{"kind": "levee", "line": line, "crest": 13.0},
+                         {"kind": "breach", "line": [_ll(g, 4.6, 13.0), _ll(g, 5.6, 16.0)]}])
+    return e, [[12, 1, 6.0], [5, 2, [0.0, 4.0, 2.0]]]
 
 
 def test_the_javascript_twin_matches_numpy_with_a_levee_in_place():

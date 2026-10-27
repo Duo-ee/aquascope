@@ -90,3 +90,20 @@ test("the JS solver matches numpy with a levee and a breach in place", () => {
   for (const x of sim.h) if (x > 0.01) wet++;
   assert.equal(wet, fx.wet);
 });
+
+test("each drawn line is its own slot in the undo log, kept across its edits", async () => {
+  const { slotOf } = await import("../src/map-actions-core.js");
+  assert.equal(slotOf({ type: "draw_levee", sketch: 4 }, 99), "sketch:4");
+  assert.equal(slotOf({ type: "draw_breach" }, 12), "sketch:12");
+});
+
+test("before and after is counted where the two runs differ", async () => {
+  const { changeBox } = await import("../src/floodsim-sketch-core.js");
+  const nx = 10, ny = 8, a = new Float32Array(nx * ny), b = new Float32Array(nx * ny);
+  a.fill(1); b.fill(1);
+  b[3 * nx + 4] = 0; b[5 * nx + 6] = 1.2;          // one cell kept dry, one deeper
+  b[1 * nx + 1] = 1.03;                            // within the tolerance
+  assert.deepEqual(changeBox(a, b, nx, ny, { pad: 1 }), { r0: 2, r1: 6, c0: 3, c1: 7 });
+  assert.deepEqual(changeBox(a, b, nx, ny, { pad: 50 }), { r0: 0, r1: 7, c0: 0, c1: 9 });
+  assert.equal(changeBox(a, a, nx, ny), null);
+});
