@@ -60,6 +60,10 @@ class CopernicusCollector(BaseCollector):
     #: GloFAS lives on the Early Warning Data Store, not the Climate Data Store.
     EWDS_URL = "https://ewds.climate.copernicus.eu/api"
 
+    #: Every day the dataset form offers.  The EWDS rejects a request without
+    #: ``day``, so the whole month is the default.
+    ALL_DAYS = tuple(f"{d:02d}" for d in range(1, 32))
+
     GLOFAS_HISTORICAL = "cems-glofas-historical"
     GLOFAS_FORECAST = "cems-glofas-forecast"
     GLOFAS_REFORECAST = "cems-glofas-seasonal-reforecast"
@@ -79,6 +83,7 @@ class CopernicusCollector(BaseCollector):
         variable: str = "average_river_discharge_in_the_last_24_hours",
         product_type: str = "consolidated",
         system_version: str = "version_5_0",
+        timespan: str = "time_mean",
         data_format: str = "grib2",
         download_format: str = "unarchived",
         api_key: str | None = None,
@@ -90,13 +95,19 @@ class CopernicusCollector(BaseCollector):
         latitude, longitude : float
             Site coordinates.
         year, month, day : str | list[str]
-            Temporal selection.
+            Temporal selection.  ``day`` defaults to every day the form
+            offers (``"01"`` to ``"31"``) because the EWDS requires it; pass
+            it explicitly for a month with fewer days.
         variable : str
             EWDS variable name.  Defaults to the historical daily-average
             river discharge.
         product_type, system_version : str
             EWDS dataset options.  The default system version is
             ``version_5_0``; pass ``version_4_0`` for the older system.
+        timespan : str
+            EWDS timespan, also required.  ``"time_mean"`` (the default) is
+            what the average discharge and runoff variables need; the
+            snow-depth and soil-wetness variables are ``"instantaneous"``.
         data_format : str
             ``"grib2"`` (default, parsed with cfgrib) or ``"netcdf"``.
         download_format : str
@@ -107,6 +118,8 @@ class CopernicusCollector(BaseCollector):
         """
         if data_format not in ("grib2", "netcdf"):
             raise ValueError("data_format must be 'grib2' or 'netcdf'")
+        if timespan not in ("time_mean", "instantaneous"):
+            raise ValueError("timespan must be 'time_mean' or 'instantaneous'")
         if download_format != "unarchived":
             raise ValueError(
                 "download_format must be 'unarchived'; the collector parses the downloaded file directly"
@@ -117,19 +130,24 @@ class CopernicusCollector(BaseCollector):
         except ImportError:
             raise ImportError("Install cdsapi: pip install aquascope[copernicus]")
 
+        if day is None:
+            day = list(self.ALL_DAYS)
+        elif isinstance(day, str):
+            day = [day]
+
         request: dict = {
             "variable": variable,
             "product_type": product_type,
             "system_version": system_version,
+            "timespan": timespan,
             "hydrological_model": "lisflood",
             "year": year,
             "month": month,
+            "day": day,
             "data_format": data_format,
             "download_format": download_format,
             "area": [latitude + 0.5, longitude - 0.5, latitude - 0.5, longitude + 0.5],
         }
-        if day:
-            request["day"] = day
 
         key = api_key or os.environ.get("CDSAPI_KEY") or None
         client = cdsapi.Client(url=self.EWDS_URL, key=key)

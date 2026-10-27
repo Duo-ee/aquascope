@@ -14,7 +14,7 @@ All notable changes to AquaScope are documented here.
 
 ### Fixed
 - **Cite 1.0.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.0.0's Zenodo DOI (10.5281/zenodo.23671741).
-- **Send GloFAS requests to the EWDS, not the CDS** (#665): `aquascope/collectors/copernicus.py` now pins `cdsapi.Client` to `https://ewds.climate.copernicus.eu/api` while still taking the key from `CDSAPI_KEY` or `.cdsapirc`; requests use the EWDS form (`average_river_discharge_in_the_last_24_hours` by default, `data_format` and `download_format` in place of `format`, `version_5_0` by default with `version_4_0` still selectable) and parse GRIB2 or NetCDF downloads. The module docstring, registry entry and docs now point at the EWDS and describe GloFAS rather than CDS/ERA5.
+- **Send GloFAS requests to the EWDS, not the CDS** (#665): `aquascope/collectors/copernicus.py` now pins `cdsapi.Client` to `https://ewds.climate.copernicus.eu/api` while still taking the key from `CDSAPI_KEY` or `.cdsapirc`; requests use the EWDS form (`average_river_discharge_in_the_last_24_hours` by default with the `time_mean` timespan, `day` defaulting to every day the form offers because the EWDS now rejects a request without it, `data_format` and `download_format` in place of `format`, `version_5_0` by default with `version_4_0` still selectable) and parse GRIB2 or NetCDF downloads. The module docstring, registry entry and docs now point at the EWDS and describe GloFAS rather than CDS/ERA5.
 
 ## [1.0.0] - 2026-10-27
 

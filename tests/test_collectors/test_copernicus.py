@@ -56,9 +56,11 @@ class TestCopernicusCollectorFetchRaw:
             "variable": "average_river_discharge_in_the_last_24_hours",
             "product_type": "consolidated",
             "system_version": "version_5_0",
+            "timespan": "time_mean",
             "hydrological_model": "lisflood",
             "year": "2023",
             "month": "01",
+            "day": [f"{d:02d}" for d in range(1, 32)],
             "data_format": "grib2",
             "download_format": "unarchived",
             "area": [49.35, 1.85, 48.35, 2.85],
@@ -66,6 +68,29 @@ class TestCopernicusCollectorFetchRaw:
         assert "format" not in request
         assert target.endswith("download.grib2")
         parse.assert_called_once_with(target, 48.85, 2.35, "grib2")
+
+    def test_default_day_covers_the_whole_month(self, fake_cdsapi):
+        _fetch(CopernicusCollector())
+
+        _, request, _ = fake_cdsapi.Client.return_value.retrieve.call_args.args
+        assert request["day"] == [f"{d:02d}" for d in range(1, 32)]
+        assert isinstance(request["day"], list)
+
+    def test_a_single_day_string_is_sent_as_a_list(self, fake_cdsapi):
+        _fetch(CopernicusCollector(), day="05")
+
+        _, request, _ = fake_cdsapi.Client.return_value.retrieve.call_args.args
+        assert request["day"] == ["05"]
+
+    def test_instantaneous_timespan_is_selectable(self, fake_cdsapi):
+        _fetch(
+            CopernicusCollector(),
+            variable="snow_depth_water_equivalent",
+            timespan="instantaneous",
+        )
+
+        _, request, _ = fake_cdsapi.Client.return_value.retrieve.call_args.args
+        assert request["timespan"] == "instantaneous"
 
     def test_older_system_and_netcdf_are_still_configurable(self, fake_cdsapi):
         _, parse = _fetch(
@@ -111,6 +136,10 @@ class TestCopernicusCollectorFetchRaw:
     def test_rejects_unknown_data_format(self):
         with pytest.raises(ValueError, match="data_format"):
             CopernicusCollector().fetch_raw(latitude=0.0, longitude=0.0, data_format="csv")
+
+    def test_rejects_unknown_timespan(self):
+        with pytest.raises(ValueError, match="timespan"):
+            CopernicusCollector().fetch_raw(latitude=0.0, longitude=0.0, timespan="daily")
 
     def test_rejects_zip_download(self):
         with pytest.raises(ValueError, match="unarchived"):
