@@ -59,7 +59,9 @@ when it is not available (the story then says so at that stop and goes on).
 - **The rain.** NASA's IMERG V07 Late Run, daily, averaged over the upstream basin by NASA/USAID SERVIR's
   [ClimateSERV](https://climateserv.servirglobal.net/develop-api) (dataset 226, operation 5, the mean). The basin goes
   as the 0.1° cells holding the centre of a GEOGLOWS unit catchment upstream of the gauge's reach (coarser cells when
-  that is more than 120 runs). The basin total and the wettest day; the rain layer on the map is IMERG too (GIBS).
+  that is more than 120 runs). A unit catchment's centre is GEOGLOWS's own, from its routing configuration (the
+  area-weighted ERA5 grid points the catchment overlaps), so the basin's edge is good to about one 0.1° cell. The basin
+  total and the wettest day; the rain layer on the map is IMERG too (GIBS).
 - **The forecast.** What GEOGLOWS's ensemble, issued at 00 UTC 1, 3 and 7 days before the peak, said for the peak day,
   from GEOGLOWS's forecast archive on S3 (`s3://geoglows-v2-forecasts/YYYYMMDD00.zarr`, one Zarr per run). For each
   run: the 51 members' daily mean on the peak day (median, lowest, highest), the high-resolution run, the share of
@@ -123,7 +125,7 @@ from 19 to 29 November, centred about 11 km west of the Severn), and the largest
 | Gauge | Saxons Lode, 433 m³/s on 26 Nov 2024 (daily mean, 432.61) | The Environment Agency's Hydrology API, the station's daily mean flow (`...-flow-m-86400-m3s-qualified`) | 432.609 m³/s on 26 Nov, the same; the EA marks these days "Suspect". Its daily maximum that day is 437.5 m³/s |
 | Gauge | Deerhurst 567 m³/s, Haw Bridge 520 m³/s (28 Nov) | The Archive's daily record (EA) | the same days and values |
 | Model | GEOGLOWS 112 m³/s on 26 Nov: -74 %, the same day | GEOGLOWS's API `retrospectivedaily/230567275` | the same; below the reach's own 2-year flow (133 m³/s). GEOGLOWS is low on the Severn's floods, as [Flood it's check](floodsim.md#why-flood-it-is-shallower) found |
-| Rain | 114 mm on the 6,884 km² upstream, 11 Nov to 5 Dec; the wettest day 23 Nov, 42 mm | The basin's area against the EA's catchment area for Saxons Lode, 6,850 km² | 0.5 % apart. No independent basin total of IMERG was found to compare with |
+| Rain | 114 mm on the 6,884 km² upstream, 11 Nov to 5 Dec; the wettest day 23 Nov, 42 mm (CLI; 115 mm and 43 mm in the browser, whose basin came out one strip of cells different, 0.8 % apart) | The basin's area against the EA's catchment area for Saxons Lode, 6,850 km² | 0.5 % apart. No independent basin total of IMERG was found to compare with |
 | Forecast | Issued 25 Nov: median 63.42 m³/s for 26 Nov (members 62.68 to 64.73), high-res 63.56; issued 19 Nov: 69.87 (50.31 to 99.43) | The same runs read with xarray and zarr 3 (a reader independent of AquaScope's) | the same to the hundredth. No member reached the 2-year flow at any lead |
 | Wave | The peak reaches Deerhurst after 5 h, Haw Bridge after 6 h, Epney after 18 h (433 m³/s at Saxons Lode, 432 at Epney) | The gauges' observed daily peaks | Deerhurst peaked the same day as Saxons Lode, consistent with 5 h. Haw Bridge peaked two days later (28 Nov); a daily record cannot resolve hours, and the tidal Severn below is not what Muskingum models |
 | Flood | 38.8 km² under water, 14.7 m at the deepest (CLI, 47 m cells); 39.1 km² and 11.7 m on the GPU (24 m cells) | Flood it's own checks (floodsim.md) | the two grids agree on the area within 1 %; the deepest cell differs with the grid, a screening number |

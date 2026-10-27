@@ -1166,7 +1166,7 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
     else:
         stop("wave", "wave", "The wave downstream", near, peak.get("date"), [],
              f"Route it not available: {wave_p.get('note')}")
-    fl_cam = {"center": here, "zoom": 12.4, "pitch": 55, "bearing": 18}
+    fl_cam = {"center": here, "zoom": 11.9, "pitch": 55, "bearing": 18}
     tmpl_flood = ("At {flow} ({flow_source}), Flood it puts {wet_km2} km² under water, {max_depth_m} m at the "
                   "deepest. A screening flood: no bathymetry, terrain errors of metres; not a design flood.")
     tmpl_expo = "Under that water: {buildings} buildings, {roads_km} km of road and about {people} people."
@@ -1181,7 +1181,7 @@ def story(rec: dict[str, Any], *, flood_result: dict[str, Any] | None = None) ->
                   "lon": f["lon"]})
         ex = (fr or {}).get("exposure")
         efill = _expo_fill(ex) if ex else None
-        stop("exposure", "exposure", "What was under the water", {**fl_cam, "zoom": 12.9, "bearing": 40},
+        stop("exposure", "exposure", "What was under the water", {**fl_cam, "zoom": 12.7, "bearing": 40},
              peak.get("date"), ["floodsim", "exposure"],
              tmpl_expo.format(**efill) if efill else (
                  f"What is under the water could not be counted: {ex.get('note')}" if ex and not ex.get("available")

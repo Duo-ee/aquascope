@@ -100,6 +100,7 @@ export async function startReplay(ev, { by = "rules", label = "", command = "" }
   const my = ++run;
   stop();
   const before = slotValue("replay");
+  if (actions.closeMapCard) actions.closeMapCard({ restore: false });   // the story owns the map now
   const p = panel();
   p.hidden = false;
   p.classList.remove("playing");
@@ -239,6 +240,7 @@ export async function goTo(i, { fly = true } = {}) {
   if (st.date) setTime({ date: st.date }, { source: "replay" });
   drawMarks(st);
   if (st.kind !== "wave" && cur.wave) { try { clearRouted(); } catch { /* gone */ } cur.wave = false; }
+  floodVisible(st.kind === "flood" || st.kind === "exposure");
   frame(st, { fly });
   if (st.kind === "wave") showWave();
   if (st.kind === "flood" || st.kind === "exposure") {
@@ -254,11 +256,28 @@ export async function goTo(i, { fly = true } = {}) {
 // The note card sits at the bottom: the camera keeps the subject above it.
 const camPadding = () => ({ top: 70, bottom: narrow() ? Math.round((globalThis.innerHeight || 800) * 0.36) : 200, left: 40, right: 40 });
 
+// Where most of the flooded buildings are: the exposure stop looks there once they are counted.
+function expoCentre() {
+  const pts = ((cur && cur.expo && cur.expo.newly_flooded) || []).map((b) => b.ring && b.ring[0]).filter(Boolean);
+  if (pts.length < 3) return null;
+  const med = (k) => pts.map((q) => q[k]).sort((a, b) => a - b)[Math.floor(pts.length / 2)];
+  return [med(0), med(1)];
+}
+
 function frame(st, { fly = true } = {}) {
   if (!state.mapOk || !map) return;
   const cam = { ...cameraFor(st, { narrow: narrow() }), padding: camPadding() };
+  if (st.kind === "exposure" && expoCentre()) cam.center = expoCentre();
   if (!fly || still()) map.jumpTo(cam);
   else map.flyTo({ ...cam, duration: 2600, essential: true });
+}
+
+// Flood it's depth and the flooded buildings belong to the flood stops: the stops before and after leave them out.
+function floodVisible(on) {
+  if (!state.mapOk || !map) return;
+  for (const l of (map.getStyle() && map.getStyle().layers) || []) {
+    if (/^floodsim-(depth|expo)/.test(l.id)) map.setLayoutProperty(l.id, "visibility", on ? "visible" : "none");
+  }
 }
 
 function setNote(st) {
@@ -362,6 +381,7 @@ async function ensureExposure() {
   try { cur.expo = (await exposureOfShown()) || { error: "no run on the map" }; }
   catch (err) { if (cur) cur.expo = { error: err.message }; }
   if (cur && cur.expo && cur.expo.newly_flooded) { try { drawExposureOf(cur.expo); } catch { /* the count stands */ } }
+  if (cur && cur.stops[cur.i] && cur.stops[cur.i].kind === "exposure") frame(cur.stops[cur.i]);
   if (cur && cur.stops[cur.i] && cur.stops[cur.i].kind === "exposure") setNote(cur.stops[cur.i]);
 }
 
@@ -448,6 +468,23 @@ function wrap(ctx, text, maxW) {
 /** The note on the frame, at the bottom, and the credit: a GIF or a video travels without the page. */
 function stampFrame(ctx, w, h, st) {
   const pad = Math.round(w / 48);
+  // The stop's place, as the page marks it (an HTML marker is not in the map's canvas).
+  if (st.focus && !["wave", "flood", "exposure", "end"].includes(st.kind) && state.mapOk && map) {
+    const q = map.project([st.focus.lon, st.focus.lat]);
+    const c = map.getCanvas();
+    const x = (q.x / c.clientWidth) * w, y = (q.y / c.clientHeight) * h;
+    ctx.beginPath(); ctx.arc(x, y, Math.max(5, w / 110), 0, Math.PI * 2);
+    ctx.fillStyle = st.kind === "forecast" ? "#c4581c" : "#0b6bb8"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    const g = (cur.record.pieces.gauges.gauges || [])[0];
+    const label = st.kind === "gauge" && g ? g.name : st.kind === "forecast" && st.run ? `${st.run.lead_days} d ahead` : "";
+    if (label) {
+      ctx.font = `600 ${Math.max(11, Math.round(w / 60))}px system-ui, -apple-system, sans-serif`;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(255, 255, 255, .92)"; ctx.fillRect(x + 10, y - 9, tw + 10, 18);
+      ctx.fillStyle = "#0d1b26"; ctx.textBaseline = "middle"; ctx.fillText(label, x + 15, y);
+    }
+  }
   const big = Math.max(12, Math.round(w / 44));
   const small = Math.max(10, Math.round(big * 0.8));
   ctx.font = `${small}px system-ui, -apple-system, sans-serif`;
