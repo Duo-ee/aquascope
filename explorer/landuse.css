@@ -7,7 +7,8 @@
   font: inherit; font-size: .76rem; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px;
   background: var(--surface-solid); color: var(--ink); max-width: 100%;
 }
-.landuse #lu-use { flex: 1; min-width: 0; }
+.landuse #lu-use { flex: 1 1 0; min-width: 0; width: 0; }
+.landuse .lu-form, .landuse .lu-field { min-width: 0; max-width: 100%; }
 .landuse input[type="number"] { width: 4.6rem; }
 .landuse.drawing { opacity: .55; pointer-events: none; }
 .lu-plain { margin: .1rem 0 0; font-size: .7rem; color: var(--muted); }

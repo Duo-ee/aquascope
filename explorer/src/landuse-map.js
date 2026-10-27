@@ -242,6 +242,11 @@ function frame(res) {
   if (!box || !state.mapOk) return;
   const p = panel();
   const pad = { top: 100, left: 50, right: 50, bottom: 120 };
+  const lg = $("map-legend");
+  if (lg && !lg.hidden && !narrow()) {   // the legend on the left, as Route it frames its wave
+    const r = lg.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
+    if (r.width && r.right < c.left + c.width / 2) pad.left = Math.max(pad.left, r.right - c.left + 24);
+  }
   if (p && !p.hidden) {
     if (narrow()) pad.bottom = Math.min(p.offsetHeight + 24, map.getContainer().clientHeight * 0.55);
     else pad.right = p.offsetWidth + 50;
@@ -297,6 +302,8 @@ async function routeExtra() {
   if (!ra || !res.reach || !actions.routeFlood) return;
   const t = { river_id: res.reach.river_id, lat: res.reach.lat, lon: res.reach.lon,
     name: `Below the ${useShort(res.use).toLowerCase()}` };
+  panel().hidden = true;   // Route it's panel takes over, with the wave's places; the area stays on the map
+  drawArea();
   if (actions.openRoute) actions.openRoute(t);
   try {
     await actions.routeFlood(t, ra, { by: "rules", label: `Route the extra ${flow(ra.peak_cms)} m³/s of the land-use change` });
