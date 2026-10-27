@@ -533,6 +533,13 @@ it down every river below; the MCP tools `route_flood` and `route_storm` return 
 JSON. In the browser a 2,000 m³/s flood from Basel routes in about 20 s, engine start and the
 trace included, measured in headless Chrome.
 
+## The sketchpad
+
+The pencil in the map tools opens the sketchpad: tools that draw on the map and compute on what
+you drew. **Draw a storm** (#670) takes an area you draw, a rain depth, its hours and a plain
+runoff coefficient, and plays the runoff's wave down every river below on the time bar, with
+the hydrographs and the mass balance on its card. See [the sketchpad](sketchpad.md).
+
 ## Paint this view
 
 The brush in the map tools paints one question at every gauge in view that the
