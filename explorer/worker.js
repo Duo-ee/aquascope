@@ -1788,6 +1788,40 @@ json.dumps(_out, default=str)
   post("result", { id, result: JSON.parse(out) });
 }
 
+// ── Draw a reservoir (#662): aquascope.sketch.reservoir, the same functions as `aquascope route reservoir` and the
+// MCP tool route_reservoir. Type "reservoir" (the main worker: the routing needs pandas and scipy): op "plan" finds
+// the river and the dam under a drawn lake and the terrain window to read; op "run" takes that window's terrain (a
+// Float32Array the page read from the Terrarium tiles) and routes a flood through the lake and on down the river.
+async function reservoirOp({ id, op, args, z }) {
+  pyodide.globals.set("_rv_args", JSON.stringify({ op: String(op || "plan"), args: args || {} }));
+  pyodide.globals.set("_rv_z", z || null);
+  const code = `
+import json
+import numpy as _np
+from aquascope.sketch import reservoir as _rv
+_a = json.loads(_rv_args)
+_k = dict(_a["args"])
+try:
+    if _a["op"] == "plan":
+        _out = _rv.plan(_k["polygon"])
+    elif _a["op"] == "run":
+        _poly = _k.pop("polygon")
+        _zz = _np.frombuffer(_rv_z.to_py(), dtype="<f4").astype("f8")
+        _out = _rv.route_reservoir(_poly, z=_zz, **_k)
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, RuntimeError, LookupError, TypeError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+json.dumps(_out, default=str)
+`;
+  try {
+    const out = await pyodide.runPythonAsync(code);
+    post("result", { id, result: JSON.parse(out) });
+  } finally {
+    pyodide.globals.set("_rv_z", null);
+  }
+}
+
 // ── Flood it (#658): aquascope.floodsim, the same functions as `aquascope flood` and the MCP tool flood_reach.
 // Type "floodsim" (the main worker: the network needs pandas, the valley scipy, the flows' store numcodecs):
 // op "plan" finds the window, the reaches and their flows (kept here for the next ops); op "prepare" takes the
@@ -2015,6 +2049,7 @@ self.onmessage = async (e) => {
     if (m.type === "flood_exposure") return await floodExposureOp(m);
     if (m.type === "whatif" || m.type === "whatif_words") return await whatIf(m);
     if (m.type === "route") return await routeOp(m);
+    if (m.type === "reservoir") return await reservoirOp(m);
     if (m.type === "floodsim") return await floodsimOp(m);
     if (m.type === "replay") return await replayOp(m);
     if (m.type === "well") return await wellOp(m);

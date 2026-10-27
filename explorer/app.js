@@ -63,6 +63,7 @@ import { initLanduse } from "./src/landuse-map.js?v=__BUILD__";  // Change land 
 import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
 import { initSketchMenu } from "./src/sketch-menu.js?v=__BUILD__";  // the sketchpad's tools (#664)
 import { initStorm } from "./src/storm-map.js?v=__BUILD__";  // Draw a storm (#670)
+import { initReservoir } from "./src/reservoir-map.js?v=__BUILD__";  // Draw a reservoir (#662)
 import { initFloodIt } from "./src/floodsim-map.js?v=__BUILD__";  // Flood it, a screening flood on the GPU (#658)
 import { initReplay } from "./src/replay.js?v=__BUILD__";  // Replay an event, a past flood as a story (#659)
 
@@ -224,6 +225,7 @@ function bringMapOnline(url) {
   initPaint();        // Paint this view, and its slot in the action log (#657)
   initSketchMenu();   // the sketchpad's menu (#664); each tool adds itself
   initStorm();        // Draw a storm (#670), after Route it: its wave is drawn there
+  initReservoir();    // Draw a reservoir (#662), after Route it and the storm
   initFloodIt();      // Flood it on the reach card, and its slot in the action log (#658)
   initReplay();       // Replay on the reach card and in Floods past, a #rp= link, its slot in the log (#659)
   initWell();         // Drop a well in the sketchpad menu, and its slot in the action log (#660)

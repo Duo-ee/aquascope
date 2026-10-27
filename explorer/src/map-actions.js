@@ -471,6 +471,14 @@ export async function applyAction(a, { by = "rules", label = "", command = "" } 
       if (!res) throw new Error("no storm was routed (no area drawn, or no river under it)");
       return log.live().slice(-1)[0];
     }
+    case "draw_reservoir": {
+      // Draw a reservoir (#662): reservoir-map.js takes the lake (the words', the one on the map, or one the reader
+      // draws), logs it, routes the flood through it and logs the run as a route; nothing to log here.
+      if (!actions.drawReservoir) throw new Error("Draw a reservoir is not on this page");
+      const res = await actions.drawReservoir(a, { by, command, label });
+      if (!res) throw new Error("no flood was routed through a reservoir (no lake drawn, or no river under it)");
+      return log.live().slice(-1)[0];
+    }
     case "draw_area":
       after = { bbox: a.bbox, label: a.label || a.where || "" };
       drawArea(id, after);
@@ -603,6 +611,7 @@ const ICON = {
   change_landuse: '<path d="M3 20h18"/><path d="M5 20v-6l4-3 4 3v6"/><path d="M13 20v-9l4-3 4 3v9"/>',
   drop_well: '<path d="M12 3v13"/><path d="M9 6h6"/><path d="M3 12c3 0 5 1 7 5h4c2-4 4-5 7-5"/><path d="M3 20h18"/>',
   draw_storm: '<path d="M7 15a4 4 0 1 1 .9-7.9A5.5 5.5 0 0 1 18.5 9 3 3 0 0 1 18 15Z"/><path d="M8 18l-1 2.5M12 18l-1 2.5M16 18l-1 2.5"/>',
+  draw_reservoir: '<path d="M3 18c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5"/><path d="M4 13c4-1 6-4 8-8 2 4 4 7 8 8"/><path d="M12 5v8"/>',
   draw_breach: '<path d="M3 17h7M14 17h7"/><path d="M5 17l3-6h2M14 11h2l3 6"/><path d="M11 13l1 4 1-4"/>',
 };
 

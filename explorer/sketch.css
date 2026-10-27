@@ -42,11 +42,29 @@
 }
 .st-handle:active { cursor: grabbing; }
 
+/* Draw a reservoir (#662): the lake is drawn by src/reservoir-map.js; its card shares the storm's parts */
+.rv-kind { margin-top: .25rem; }
+.rv-kind input[type="number"]#rv-dur { width: 3.6rem; }
+.rv-kind input:disabled + span { color: var(--muted); }
+.st-q.rv-inflow { stroke: #4292c6; stroke-dasharray: 4 2; }
+.st-q.rv-outflow { stroke: #1c6ea4; stroke-width: 2.4; }
+.st-key.rv-inflow i { border-top: 2px dashed #4292c6; }
+.st-key.rv-outflow i { border-top: 2.4px solid #1c6ea4; }
+.rv-notes { margin: .35rem 0 0; padding-left: 1rem; font-size: .7rem; color: var(--ink-2); }
+.rv-notes li + li { margin-top: .15rem; }
+.rv-handle { border-color: #1c6ea4; }
+.reservoir { width: 350px; max-height: calc(100% - 64px); overflow-y: auto; }
+/* after a run the dam's settings fold away on a desktop too, so the card keeps to the answer */
+.reservoir.done .rv-form, .reservoir.done .wi-sub { display: none; }
+.reservoir.done .wi-edit { display: inline; }
+
 @media (max-width: 640px) {
   .sketch-menu { left: calc(100% + 6px); min-width: 210px; }
   .storm { width: auto; }
   .storm.drawing { display: none; }   /* the whole map is the drawing's while it is drawn */
-  .storm.done .st-form, .storm.done .wi-sub, .storm.done .st-rule, .storm.done .wi-model { display: none; }
+  .storm.done .st-form, .storm.done .rv-form, .storm.done .wi-sub, .storm.done .st-rule, .storm.done .wi-model,
+  .storm.done .rv-notes { display: none; }
+  .reservoir { width: auto; }
   .storm.done .wi-edit { display: inline; }
   /* after a run: a bottom sheet over the time bar's top, short, so the area and the wave show above it */
   .storm.done { top: auto; bottom: 150px; max-height: 34vh; overflow: auto; }

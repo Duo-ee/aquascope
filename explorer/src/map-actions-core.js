@@ -72,6 +72,7 @@ export function slotOf(action, id) {
     case "change_landuse": return "landuse"; // one land-use change on the map at a time (#661)
     case "drop_well": return "wells";        // the wells on the map, one value (#660); undo puts the last one back
     case "draw_storm": return "storm";       // the storm's area (#670); its run is a route, one wave at a time
+    case "draw_reservoir": return "reservoir";   // the lake drawn (#662); its run is a route too
     default: return null;
   }
 }

@@ -46,6 +46,9 @@ PHRASES = [
         {"type": "route", "place": "Basel", "peak_cms": 500.0, "duration_h": 24.0, "shape": "triangle"}]),
     ("50 mm of rain over this area in 6 hours", [
         {"type": "draw_storm", "rain_mm": 50.0, "duration_h": 6.0, "runoff_coefficient": 0.3, "area": "drawn"}]),
+    ("draw a reservoir here", [
+        {"type": "draw_reservoir", "crest_m": 10.0, "top_m": 15.0, "width_m": 30.0, "return_period": 100.0,
+         "duration_h": 24.0, "area": "drawn"}]),
     ("Fly to Kingston upon Thames", [{"type": "fly_to", "place": "Kingston upon Thames"}]),
     ("take me to Taipei please", [{"type": "fly_to", "place": "Taipei"}]),
     ("go to 23.7, 90.4", [{"type": "fly_to", "center": [23.7, 90.4], "zoom": 8.0}]),

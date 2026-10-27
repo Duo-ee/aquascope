@@ -23,7 +23,8 @@ What is here and why (``docs/stability.md`` has the full policy):
 * The sketchpad (#664): ``aquascope.sketch``. Drop a well (#660): ``aquascope.sketch.drawdown`` (Theis with
   superposition), ``aquascope well`` and the MCP tool ``drop_well``; change land use (#661):
   ``aquascope.sketch.landuse`` (the SCS curve number, TR-55), ``aquascope landuse`` and the MCP tool
-  ``change_landuse``; new in 1.1.
+  ``change_landuse``; a drawn reservoir (#662: ``aquascope.sketch.reservoir``, ``aquascope route reservoir``
+  and the MCP tool ``route_reservoir``), new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -148,6 +149,7 @@ MCP_TOOLS: tuple[str, ...] = (
     "river_status_month",
     "river_status_summary",
     "route_flood",
+    "route_reservoir",
     "route_storm",
     "snap_to_river",
     "status_bulletin",
