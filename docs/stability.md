@@ -144,7 +144,8 @@ benchmark:
   `apply_breach`, `edit_grid`, `compare_exposure`), `aquascope flood --levee/--crest/--breach/--invert` and the same
   arguments of `flood_reach`.
 - **Added in 1.1:** `aquascope.sketch` (the sketchpad, #664): `aquascope.sketch.drawdown` (drop a well, Theis with
-  superposition, #660), `aquascope well` and the MCP tool `drop_well`.
+  superposition, #660), `aquascope well` and the MCP tool `drop_well`; `aquascope.sketch.landuse` (change land use,
+  the SCS curve number of TR-55, #661), `aquascope landuse` and the MCP tool `change_landuse`.
 - **Added in 1.1:** `aquascope.replay` (replay an event: a past flood as a story on the map, #659), `aquascope replay`
   and the MCP tools `replay_candidates` and `replay_event`; `aquascope.routing.route` takes a real hydrograph
   (`inflow_cms`).

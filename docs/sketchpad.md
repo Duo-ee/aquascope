@@ -207,3 +207,105 @@ contours in lon/lat.
 - Heath, R.C. (1983). *Basic ground-water hydrology*. USGS Water-Supply Paper 2220.
 - Peaceman, D.W. (1978). Interpretation of well-block pressures in numerical reservoir simulation. *SPE Journal*,
   18(3), 183-194. doi:10.2118/6893-PA.
+
+## Change land use
+
+"What if this area is built over?" **Change land use** in the sketchpad's menu draws an area (tap its corners and
+press **Done**, or drag a box, with the levee and storm drawing tool), then asks what it becomes, the design storm
+and, if you know it, the soil group. **Compute** reads what is under the area now, works out its runoff and its peak
+flow before and after with the SCS curve number method, and draws the answer: the area filled in what it becomes and
+labelled with its peak's change, the GEOGLOWS reach it drains to lit in orange, with the way to it. The panel (a sheet
+on a phone) gives the curve number, the runoff, the time of concentration and the peak, now and after, the cover under
+the area as a bar in WorldCover's colours, the soil groups, and every source with its licence. Drag a corner and it is
+computed again. **Route the extra peak downstream** sends the added peak down the river with Route it, as a triangle
+carrying the added runoff volume. Every change is in the undo log.
+
+![A field on the edge of Lyon as town houses: the area, its reach, and the numbers](img/sketchpad/landuse-result-desktop.jpg)
+
+### The method
+
+USDA's TR-55 (*Urban Hydrology for Small Watersheds*, second edition, June 1986):
+
+- **Runoff**, equations 2-1 to 2-4: `Q = (P - 0.2S)² / (P + 0.8S)` for `P > 0.2S`, `S = 1000/CN - 10` (inches).
+- **Curve numbers**, tables 2-2a to 2-2c, area-weighted; a share of impervious area with figure 2-3 (its equation is
+  in appendix F).
+- **Peak**, the graphical method of chapter 4: `qp = qu Am Q Fp`, `qu` from the equation behind exhibit 4 (appendix
+  F, table F-1) for Tc and `Ia/P`, interpolated between the table's `Ia/P` rows and held at the limiting values outside
+  them, as TR-55 recommends; `Fp`, the pond and swamp factor, from table 4-2.
+- **Time of concentration**: the watershed lag method of NRCS's National Engineering Handbook, part 630, subpart F
+  (amended June 2025), equation 630.15-4b, `Tc = l^0.8 (S + 1)^0.7 / (1140 Y^0.5)`, with the flow length from the
+  area (equation 630.15-5, `l = 209 A^0.6`) and `Y` the average land slope read from the terrain, before and after
+  (the curve number held to 50 to 95 there, as the handbook asks).
+
+**What is under the area now**, read for the polygon in your browser:
+
+| Input | Source | Licence | How it is read |
+| --- | --- | --- | --- |
+| Land cover | ESA WorldCover 10 m 2021 v200, the Explorer's land-cover layer (Terrascope's tiles) | CC BY 4.0 | The tiles' colours are the product's own legend; every pixel inside the polygon counted |
+| Hydrologic soil group | HYSOGs250m (Ross et al. 2018, ORNL DAAC, doi:10.3334/ORNLDAAC/1566), in the Natural Capital Alliance's cloud-optimised copy | ORNL DAAC: openly shared, without restriction; the copy: CC BY 4.0 | Range reads of the COG; dual groups (A/D, B/D, C/D) are D in that copy (undrained). Or the group you pick |
+| Slope and the lowest point | Terrarium tiles (Mapzen/Tilezen joerd on AWS Open Data) | open (joerd's attribution list) | Mean gradient over the polygon |
+| The reach below | GEOGLOWS v2 stream network (TDX-Hydro) | CC BY-SA 4.0 | The lowest point snapped to the nearest reach |
+
+All four answer a browser's cross-origin reads, checked on 2026-10-27 with the Explorer's own origin; nothing is
+mirrored. The WorldCover COGs on AWS do not send a CORS header, which is why the tiles are read instead.
+
+**WorldCover to TR-55.** Tree cover is woods (good); shrubland, brush (fair); grassland, pasture (good); cropland, row
+crops (straight row, good); bare or sparse vegetation, fallow bare soil; built-up, paved (CN 98), because at 10 m a
+built-up pixel is the roof or the pavement itself, and TR-55's urban districts already average in the lawns that
+WorldCover maps apart. Water, herbaceous wetland and mangroves count as ponds and swamps for `Fp`. Snow and ice, and
+moss and lichen, have no TR-55 cover and are left out of the curve number (the panel says so). Cover and soil are
+crossed as if independent inside the polygon.
+
+**The uses** are TR-55's own covers: residential lots of 1/8, 1/4, 1/2 and 1 acre (65, 38, 25 and 20% impervious),
+commercial and business (85%), industrial (72%), paved, newly graded, open space in good condition, row crops,
+pasture, meadow, woods, or a share of impervious area you give. After the change the whole area is that use, with no
+ponds.
+
+**The design storm** is yours: the panel starts at 100 mm in 24 hours as a placeholder, not a statistic of any place,
+and says so. The rainfall distribution is one of SCS's types I, IA, II and III (II by default). These are United
+States distributions; elsewhere, choose the one closest to your storms, or read the peak as a guide.
+
+**Limits**, as TR-55 states them: average runoff condition (Ia = 0.2S), CN above 40, Tc from 0.1 to 10 h, no snowmelt,
+one homogeneous small watershed. The lag equation was fitted on watersheds from 1.3 acres to 9.2 square miles (a
+reasonable upper limit about 19 square miles), and the panel says when an area is larger.
+
+### The check
+
+`aquascope landuse --check` recomputes these, and `tests/test_sketch_landuse.py` holds them:
+
+| Reference | Printed | Computed |
+| --- | --- | --- |
+| TR-55 example 2-1 (figure 2-5): pasture, good, on B and C soils, 6.0 in of rain | CN 70, Q 2.81 in | CN 70, Q 2.81 in |
+| TR-55 example 2-2 (figure 2-6): 1/2-acre lots and open space | CN 75, Q 3.28 in | CN 75, Q 3.28 in |
+| TR-55 example 2-3 (figure 2-7): 35% impervious lots, figure 2-3 | CN 77 (lines 74, 82), Q 3.48 in | CN 77 (figure 74.0, 82.4), Q 3.48 in |
+| TR-55 example 2-4 (figure 2-8): half the impervious area unconnected, figure 2-4 | CN 74 (line 78), Q 3.19 in | CN 74 (figure 78.5), Q 3.18 in |
+| TR-55 example 4-1 (worksheet 4): 0.39 mi², CN 75, Tc 1.53 h, type II, 6.0 in | Ia/P 0.11, qu 270 csm/in, qp 345 cfs | Ia/P 0.111, qu 269 csm/in, qp 345 cfs |
+| NEH 630 subpart F, 630.74 A (Mawney Brook): l 3,865 ft, CN 63, Y 4.79% | Tc 1.14 h | Tc 1.14 h |
+
+The book reads Q from table 2-1 or figure 2-1 and CN from figures 2-3 and 2-4 to whole numbers; the equations give
+3.18 in where the book prints 3.19 (CN 74 is not a row of table 2-1) and 78.5 where it reads 78 off figure 2-4.
+
+### From words, a CLI and an agent
+
+Ask the map reads "change this area to houses", "turn this field into a car park with 80 mm of rain", "what if this
+area is built over", "plant woods here" and "convert this area into a shopping mall" into the `change_landuse` action
+without a model; the area is drawn on the map. The same function from a terminal and for an agent:
+
+```bash
+aquascope landuse --polygon '[[4.955,45.70],[4.97,45.70],[4.97,45.708],[4.955,45.708]]' --use residential_1_8 --rain 100
+aquascope landuse --uses
+aquascope landuse --check
+```
+
+The MCP tool `change_landuse` takes the polygon, the use, `rain_mm`, `distribution`, `soil_group` and
+`impervious_pct`, and returns the same numbers, the sources and the licences.
+
+### References
+
+- USDA Soil Conservation Service (1986). *Urban Hydrology for Small Watersheds*, Technical Release 55, 2nd edition
+  (210-VI-TR-55).
+- USDA NRCS (2025). *National Engineering Handbook*, part 630 Hydrology, subpart F, Time of Concentration (amended
+  June 2025).
+- Ross, C.W., Prihodko, L., Anchang, J.Y., Kumar, S.S., Ji, W. and Hanan, N.P. (2018). Global Hydrologic Soil Groups
+  (HYSOGs250m) for Curve Number-Based Runoff Modeling. ORNL DAAC. doi:10.3334/ORNLDAAC/1566.
+- Zanaga, D. et al. (2022). ESA WorldCover 10 m 2021 v200. doi:10.5281/zenodo.7254221.

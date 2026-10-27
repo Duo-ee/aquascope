@@ -127,6 +127,8 @@ const TOOLS = [
       + "rain on an area run off and routed down every river below (aquascope.routing.route_storm, #670). "
       + "drop_well {place | lat, lon | at: center, rate_m3_day, days, transmissivity, storativity}: a pumping well "
       + "and its drawdown cone, added to the wells on the map (aquascope.sketch.drawdown, Theis, #660). "
+      + "change_landuse {use, area: drawn | polygon [[lon,lat],...], rain_mm, soil_group, impervious_pct}: the area's "
+      + "runoff and peak before and after (aquascope.sketch.landuse, TR-55, #661). "
       + "Each is checked before it runs; place names are looked up in the gazetteer.",
     inputSchema: {
       type: "object",

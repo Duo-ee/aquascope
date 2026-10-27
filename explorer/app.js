@@ -59,6 +59,7 @@ import { initScout } from "./src/scout.js?v=__BUILD__";  // Scout (#563): pins o
 import { initWhatIf } from "./src/whatif-map.js?v=__BUILD__";  // What if, on the map (#565)
 import { initRoute } from "./src/route-map.js?v=__BUILD__";  // Route it (#656)
 import { initWell } from "./src/well-map.js?v=__BUILD__";  // Drop a well (#660)
+import { initLanduse } from "./src/landuse-map.js?v=__BUILD__";  // Change land use (#661)
 import { initPaint } from "./src/paint.js?v=__BUILD__";  // Paint the globe (#657)
 import { initSketchMenu } from "./src/sketch-menu.js?v=__BUILD__";  // the sketchpad's tools (#664)
 import { initStorm } from "./src/storm-map.js?v=__BUILD__";  // Draw a storm (#670)
@@ -226,6 +227,7 @@ function bringMapOnline(url) {
   initFloodIt();      // Flood it on the reach card, and its slot in the action log (#658)
   initReplay();       // Replay on the reach card and in Floods past, a #rp= link, its slot in the log (#659)
   initWell();         // Drop a well in the sketchpad menu, and its slot in the action log (#660)
+  initLanduse();      // Change land use in the sketchpad menu, and its slot in the action log (#661)
   // A selection made while the map was still dark has nothing on the map yet.
   if (state.selected) {
     highlightStation(`${state.selected.source}/${state.selected.station_id}`);
