@@ -399,3 +399,14 @@ def test_ask_the_map_draws_levees_and_breaches():
     props = schema["properties"]["actions"]["items"]["properties"] if "properties" in schema else {}
     assert not props or {"line", "crest", "freeboard_m", "invert", "from_place", "to_place"} <= set(props)
     assert "draw_levee" in str(mc.model_prompt("draw a levee"))
+
+
+def test_a_line_off_the_grid_is_skipped_when_asked():
+    g = _grid(np.zeros((10, 10)))
+    far = [[10.0, 40.0], [10.1, 40.1]]
+    with pytest.raises(ValueError):
+        fs.edit_grid(g, [{"kind": "levee", "line": far, "crest": 3.0}])
+    e = fs.edit_grid(g, [{"kind": "levee", "line": far, "crest": 3.0, "id": 7}], skip_outside=True)
+    assert e["edits"] == [{"kind": "levee", "skipped": "the line does not cross this grid", "cells": [], "id": 7}]
+    assert (e["z_burnt"] == g["z_burnt"]).all()
+    assert fs.levee_profile(g, [_ll(g, 2.5, 1.5), _ll(g, 2.5, 8.5)], freeboard_m=2.0)["freeboard_m"] == 2.0

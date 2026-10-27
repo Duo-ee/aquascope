@@ -741,35 +741,42 @@ def edits_from(levees: Any = (), crests: Any = (), breaches: Any = (), inverts: 
     return out
 
 
-def edit_grid(grid: dict[str, Any], edits: list[dict[str, Any]]) -> dict[str, Any]:
+def edit_grid(grid: dict[str, Any], edits: list[dict[str, Any]], *, skip_outside: bool = False) -> dict[str, Any]:
     """A :func:`prepare_grid` answer with levees and breaches applied in the order given: each edit is
     ``{"kind": "levee", "line": [[lon, lat], ...], "crest": m}`` or ``{"kind": "breach", "line": [...],
     "invert": m}`` (the invert may be left out: the natural ground). The answer is a new grid (the arrays copied,
     the input unchanged) with ``natural`` (the terrain before any edit) and ``edits`` (each edit's cells and
-    numbers). The same edits always give the same grid."""
+    numbers). The same edits always give the same grid. With ``skip_outside`` an edit whose line misses the grid
+    is listed with ``skipped`` instead of stopping (the Explorer keeps drawn lines when another river is
+    flooded)."""
     nat = _natural(grid)
     g = {**grid, "natural": nat, "z": np.array(nat["z"]), "z_burnt": np.array(nat["z_burnt"]), "edits": []}
     for k, e in enumerate(edits or []):
         kind = e.get("kind")
-        if kind == "levee":
-            if e.get("crest") is None:
-                raise ValueError(f"edit {k + 1}: a levee needs a crest (m above mean sea level)")
-            out = apply_levee(g, e["line"], float(e["crest"]))
-        elif kind == "breach":
-            out = apply_breach(g, e["line"], e.get("invert"))
-        else:
+        if kind not in ("levee", "breach"):
             raise ValueError(f"edit {k + 1}: kind must be levee or breach, not {kind!r}")
+        if kind == "levee" and e.get("crest") is None:
+            raise ValueError(f"edit {k + 1}: a levee needs a crest (m above mean sea level)")
+        if skip_outside and not supercover_cells(g, e["line"]):
+            g["edits"].append({"kind": kind, "skipped": "the line does not cross this grid", "cells": [],
+                               **({"id": e["id"]} if "id" in e else {})})
+            continue
+        out = (apply_levee(g, e["line"], float(e["crest"])) if kind == "levee"
+               else apply_breach(g, e["line"], e.get("invert")))
         g["z_burnt"], g["z"] = out.pop("terrain"), out.pop("ground")
-        g["edits"].append({**out, "line": [[round(float(p[0]), 6), round(float(p[1]), 6)] for p in e["line"]]})
+        g["edits"].append({**out, "line": [[round(float(p[0]), 6), round(float(p[1]), 6)] for p in e["line"]],
+                           **({"id": e["id"]} if "id" in e else {})})
     return g
 
 
-def levee_profile(grid: dict[str, Any], line: Any, h: Any = None, *, wet_m: float = 0.05) -> dict[str, Any]:
+def levee_profile(grid: dict[str, Any], line: Any, h: Any = None, *, wet_m: float = 0.05,
+                  freeboard_m: float = FREEBOARD_M) -> dict[str, Any]:
     """The ground and the flood level along a drawn line, for setting a levee's crest: for each cell the line
     crosses (in order), the distance along the line, the natural ground, the terrain now (with any levee) and,
     given a run's depth ``h`` (over the burnt bed, as :func:`run_grid` returns it), the water level where it is
     wetter than ``wet_m`` (None where dry). ``suggested_crest_m`` is the highest water along the line plus
-    :data:`FREEBOARD_M`, rounded up to 10 cm; with no water on the line, the highest ground plus 1 m."""
+    ``freeboard_m`` (:data:`FREEBOARD_M` by default), rounded up to 10 cm; with no water on the line, the highest
+    ground plus 1 m."""
     win = grid.get("window", grid)
     cells = supercover_cells(grid, line)
     if not cells:
@@ -786,12 +793,12 @@ def levee_profile(grid: dict[str, Any], line: Any, h: Any = None, *, wet_m: floa
         lvl = np.asarray(grid["z_burnt"], dtype="f8")[rr, cc] + hh
         water = [round(float(v), 2) if d > wet_m else None for v, d in zip(lvl, hh)]
     wet = [w for w in water if w is not None]
-    top = max(wet) + FREEBOARD_M if wet else float(ground.max()) + 1.0
+    top = max(wet) + float(freeboard_m) if wet else float(ground.max()) + 1.0
     return {"cells": [[int(r), int(c)] for r, c in cells], "distance_m": [round(float(d), 1) for d in dist],
             "ground_m": [round(float(v), 2) for v in ground], "terrain_m": [round(float(v), 2) for v in now],
             "water_m": water, "highest_water_m": round(max(wet), 2) if wet else None,
             "lowest_ground_m": round(float(ground.min()), 2), "highest_ground_m": round(float(ground.max()), 2),
-            "suggested_crest_m": math.ceil(round(top * 10.0, 6)) / 10.0, "freeboard_m": FREEBOARD_M,
+            "suggested_crest_m": math.ceil(round(top * 10.0, 6)) / 10.0, "freeboard_m": float(freeboard_m),
             "length_m": round(_line_m(win, line), 1)}
 
 

@@ -1793,11 +1793,17 @@ json.dumps(_out, default=str)
 // op "plan" finds the window, the reaches and their flows (kept here for the next ops); op "prepare" takes the
 // window's terrain (a Float32Array the page read from the Terrarium tiles) and returns the grid the GPU or the
 // fallback worker floods: the burnt bed and Manning's n as Float32Arrays, the inflows, the edges and the words;
-// op "forecast" and op "routed" return a hydrograph at the clicked reach.
+// op "forecast" and op "routed" return a hydrograph at the clicked reach. Levees and breaches (#663): "prepare" takes
+// the drawn lines as edits (aquascope.floodsim.edit_grid) and returns the edited terrain; op "profile" gives the
+// ground and the flood level along a line and the crest the code suggests (levee_profile, z: the run's largest
+// depth); op "exposure" counts what gets flooded before and after (compare_exposure, z: the two depths over the
+// terrain, one after the other; read: what the light worker read).
 let floodsimReady = null;
 async function floodsimOp({ id, op, args, z }) {
   if (!floodsimReady) floodsimReady = pyodide.loadPackage(["numcodecs"]).catch(() => null);
   await floodsimReady;
+  // Before and after (#663) reads the two runs back as a mesh, which places it with pyproj.
+  if (op === "exposure" && !pyprojLoaded) { await pyodide.loadPackage(["pyproj"]); pyprojLoaded = true; }
   pyodide.globals.set("_fs_args", JSON.stringify({ op: String(op || "plan"), args: args || {} }));
   pyodide.globals.set("_fs_z", z || null);
   const code = `
@@ -1819,6 +1825,11 @@ try:
         _p = _FS[str(_k["river_id"])]
         _zz = _np.frombuffer(_fs_z.to_py(), dtype="<f4").astype("f8")
         _g = _fs.prepare_grid(_p, _zz, _k.get("choice") or {"return_period": 100}, coarse=bool(_k.get("coarse")))
+        _FS["grid"] = _g
+        _edits = None
+        if _k.get("edits"):
+            _g = _fs.edit_grid(_g, _k["edits"], skip_outside=True)
+            _edits = [{k: v for k, v in e.items() if k != "cells"} | {"cells": len(e["cells"])} for e in _g["edits"]]
         _arrays = {"z": _g["z_burnt"].astype("<f4").ravel(), "n": _g["n"].astype("<f4").ravel(),
                    "ground": _g["z"].astype("<f4").ravel()}
         _out = {"ok": True, "window": _g["window"], "nx": _g["nx"], "ny": _g["ny"], "dx": _g["dx"],
@@ -1829,7 +1840,16 @@ try:
                 "exits": _g["exits"], "slope": _g["slope"], "table_dt_s": _g["table_dt_s"], "hours": _g["hours"],
                 "click": {k: v for k, v in _g["click"].items() if k != "curve"}, "label": _g["label"],
                 "coarse": _g["coarse"], "channels": len(_g["channels"]), "reaches": len(_p["reaches"]),
-                "flow_method": _fs.FLOW_METHOD, "licences": _fs.LICENCES}
+                "flow_method": _fs.FLOW_METHOD, "licences": _fs.LICENCES, "edits": _edits}
+    elif _a["op"] == "profile":
+        _g = _fs.edit_grid(_FS["grid"], _k.get("edits") or [], skip_outside=True)
+        _h = _np.frombuffer(_fs_z.to_py(), dtype="<f4").astype("f8") if _fs_z is not None else None
+        _out = {"ok": True, **_fs.levee_profile(_g, _k["line"], _h,
+                                                freeboard_m=float(_k.get("freeboard_m") or _fs.FREEBOARD_M))}
+    elif _a["op"] == "exposure":
+        _g = _fs.edit_grid(_FS["grid"], _k.get("edits") or [], skip_outside=True)
+        _two = _np.frombuffer(_fs_z.to_py(), dtype="<f4").astype("f8").reshape(2, -1)
+        _out = {"ok": True, **_fs.compare_exposure(_g, _two[0], _two[1], _k["read"])}
     elif _a["op"] == "forecast":
         _out = {"ok": True, **_fs.forecast_series(int(_k["river_id"]))}
     elif _a["op"] == "routed":
