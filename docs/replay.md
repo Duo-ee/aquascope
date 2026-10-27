@@ -8,13 +8,15 @@ day before, down the river with the wave, and into the valley as Flood it floods
 under the water. The note at the bottom says what each stop shows. **Every number in a note is written by code from
 the data; no model writes one.**
 
-![The Severn in November 2024 (Storm Bert): the gauge at Saxons Lode against GEOGLOWS](img/replay/severn-gauge-desktop.png)
+![The Severn in November 2024 (Storm Bert): the gauge at Saxons Lode against GEOGLOWS](img/replay/severn-gauge-desktop.jpg)
 
 ## What you do
 
 1. **Find the flood.** In **Floods past**, click a news circle (from zoom 6): its card lists the floods its reports
    make, grouped into runs of days, most reported first, each with **Replay**. Or click a river, press **Replay** on
    its card and give a date (the map's by default); the floods in the news there that month are offered too.
+   A card covers its cell's months: with no range on the time bar that is the twelve months up to the map's date, so
+   the most reported flood of the year comes first; stepping the time bar by month keeps the card to one month.
 2. **Watch.** The pieces are read (about two minutes the first time: the engine starts, then the gauges, the rain, the
    forecast archive and the wave), then the story plays. **Play** and **pause**, **‹ ›** (or the arrow keys) step
    between stops, and the scrubber jumps to any stop. The time bar moves with the story.
@@ -29,16 +31,17 @@ writes every number. Every replay is an entry in the undo log.
 
 | | |
 | --- | --- |
-| ![Floods past's card with Replay](img/replay/severn-card-desktop.png) | ![The rain over the basin](img/replay/severn-rain-desktop.png) |
-| ![What the forecast said 3 days before](img/replay/severn-forecast-desktop.png) | ![The wave downstream](img/replay/severn-wave-desktop.png) |
-| ![The flood at the peak](img/replay/severn-flood-desktop.png) | ![What was under the water](img/replay/severn-exposure-desktop.png) |
-| ![Export and share](img/replay/severn-export-desktop.png) | ![Hurricane Helene at Asheville](img/replay/helene-gauge-desktop.png) |
+| ![Floods past's card with Replay](img/replay/severn-card-desktop.jpg) | ![The rain over the basin](img/replay/severn-rain-desktop.jpg) |
+| ![What the forecast said 3 days before](img/replay/severn-forecast-desktop.jpg) | ![The wave downstream](img/replay/severn-wave-desktop.jpg) |
+| ![The flood at the peak](img/replay/severn-flood-desktop.jpg) | ![What was under the water](img/replay/severn-exposure-desktop.jpg) |
+| ![Export and share](img/replay/severn-export-desktop.jpg) | ![Hurricane Helene at Asheville: the gauge against GEOGLOWS](img/replay/helene-gauge-desktop.jpg) |
+| ![Helene: the flood at the peak on the French Broad](img/replay/helene-flood-desktop.jpg) | ![The Severn, January 2024: before the forecast archive starts, and the stop says so](img/replay/henk-noforecast-desktop.jpg) |
 
 On a phone the note is a sheet at the bottom and the camera keeps the subject above it:
 
-| | | | |
-| --- | --- | --- | --- |
-| ![Phone: the rain](img/replay/severn-rain-phone.png) | ![Phone: the gauge](img/replay/severn-gauge-phone.png) | ![Phone: the flood](img/replay/severn-flood-phone.png) | ![Phone: export](img/replay/severn-export-phone.png) |
+| | | | | |
+| --- | --- | --- | --- | --- |
+| ![Phone: Floods past's card with Replay](img/replay/severn-card-phone.jpg) | ![Phone: the rain](img/replay/severn-rain-phone.jpg) | ![Phone: the gauge](img/replay/severn-gauge-phone.jpg) | ![Phone: the flood](img/replay/severn-flood-phone.jpg) | ![Phone: export](img/replay/severn-export-phone.jpg) |
 
 ![The Severn replay as a GIF](img/replay/replay-severn.gif)
 

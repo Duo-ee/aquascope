@@ -582,7 +582,7 @@ Markdown report; copy a link that replays it. Ask the map reads "replay the Seve
 number in a note is written by code from the data. The pieces, the story format and the checks on two events (the
 Severn in Storm Bert and the French Broad in Hurricane Helene) are in [Replay an event](replay.md).
 
-![Replay: the gauge at Saxons Lode against GEOGLOWS, November 2024](img/replay/severn-gauge-desktop.png)
+![Replay: the gauge at Saxons Lode against GEOGLOWS, November 2024](img/replay/severn-gauge-desktop.jpg)
 
 ## Map layers
 
