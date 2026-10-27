@@ -1475,10 +1475,11 @@ def load_skill(base: str = ARCHIVE_BASE) -> list[dict[str, Any]] | None:
 def usual_flow(base: str = ARCHIVE_BASE) -> list[list[float]] | None:
     """``[[lat, lon, usual flow in m3/s], ...]`` for every HydroBASINS level-4 basin (needs pyarrow, else None).
 
-    A basin's usual flow is the median over the twelve months of the flow its outlet is reached on one day in
-    four in that month: the ``0.75`` column of the HydroSOS thresholds table, the same table the status classes
-    above are drawn from (``aquascope.map_layers.STATUS_THRESHOLDS_URL``). The coordinates are the basin's
-    representative point (``waterbalance/basins.parquet``), so a near-dry test on them is a neighbourhood one."""
+    A basin's usual flow is the median over the twelve months of the flow its outlet exceeded in one year in
+    four in that month: the ``0.75`` column of the HydroSOS thresholds table, the 75th percentile of that
+    month's mean flow across years and the same table the status classes above are drawn from
+    (``aquascope.map_layers.STATUS_THRESHOLDS_URL``). The coordinates are the basin's representative point
+    (``waterbalance/basins.parquet``), so a near-dry test on them is a neighbourhood one."""
     from aquascope.map_layers import STATUS_THRESHOLDS_URL
 
     points = _parquet_rows(f"{base}waterbalance/basins.parquet", ["hybas_id", "lat", "lon"])
@@ -1514,7 +1515,8 @@ def scan(view: dict[str, Any] | None = None, month: str | None = None, *, max_pi
     and evidence rows when the caller has read them (the browser); otherwise they are read here when pyarrow is
     installed. ``warnings`` is the Floods ahead GeoJSON with its manifest under ``manifest``. ``places`` names the
     candidates with the gazetteer here (True), not at all (False), or ``"page"``: each gets a ``place_url`` the
-    caller fetches and hands to :func:`apply_places`."""
+    caller fetches and hands to :func:`apply_places`. ``usual`` is the basin flow table (:func:`usual_flow`) when
+    the caller has read it; without it the table is read here, and if it cannot be read the notes say so."""
     t0 = time.monotonic()
     view = check_view(view)
     want = set(kinds or KINDS)
@@ -1537,9 +1539,9 @@ def scan(view: dict[str, Any] | None = None, month: str | None = None, *, max_pi
         if classes is not None:
             if usual is None:
                 usual = usual_flow(base)
-                if usual is None:
-                    notes.append("the basin flow table was not read here (it needs pyarrow, or the table from "
-                                 "the daily file), so near-dry areas are not set aside")
+            if not usual:
+                notes.append("the basin flow table was not read here (it needs pyarrow, or the table from "
+                             "the daily file), so near-dry areas are not set aside")
             kept, dry = split_near_dry(status_findings(classes, m, view=view, top=top, usual=usual))
             findings += kept
             inputs["status_month"] = m
@@ -1605,8 +1607,7 @@ def scan(view: dict[str, Any] | None = None, month: str | None = None, *, max_pi
     return {"view": view, "picks": [_public(f) for f in cands[:max_pins]],
             "candidates": [_public(f) for f in cands], "findings": [_public(f) for f in findings],
             "inputs": inputs, "notes": notes, "sources": _sources_used(findings), "about": ABOUT,
-            "method": method_text(), "seconds": round(time.monotonic() - t0, 2), "timings": timings, "by": "rules",
-            "usual": usual or []}
+            "method": method_text(), "seconds": round(time.monotonic() - t0, 2), "timings": timings, "by": "rules"}
 
 
 def _public(f: dict[str, Any]) -> dict[str, Any]:
@@ -1657,7 +1658,10 @@ def daily(out: str | Path, *, base: str = ARCHIVE_BASE, warnings_dir: str | Path
             warnings["manifest"] = json.loads(mpath.read_text(encoding="utf-8")) if mpath.exists() else {}
             if warnings["manifest"].get("smoke"):
                 warnings = None   # a smoke run is never the day's issue
-    res = scan(None, None, max_pins=MAX_PINS, warnings=warnings, places=False, base=base, top=top)
+    # Read the basin flow table here rather than in scan(): it is ~22 kB, and only this file carries it (a live
+    # scan in the browser reads it back from scout/latest.json).
+    usual = usual_flow(base) or []
+    res = scan(None, None, max_pins=MAX_PINS, warnings=warnings, places=False, base=base, top=top, usual=usual)
     findings = res["findings"]
     # Record checks (the history is read here only: about 36 status files of 500 kB and a few hundred kB of
     # Floods past months).
@@ -1667,8 +1671,7 @@ def daily(out: str | Path, *, base: str = ARCHIVE_BASE, warnings_dir: str | Path
             m, classes = load_status(sm)
             blocks = status_blocks(classes, 5) if classes is not None else None
             if blocks is not None:
-                live, _ = split_near_dry(status_findings(classes, m, top=top, blocks=blocks,
-                                                         usual=res.get("usual")))
+                live, _ = split_near_dry(status_findings(classes, m, top=top, blocks=blocks, usual=usual))
                 past = {}
                 for other in status_months():
                     if other[5:7] == m[5:7] and other < m:
@@ -1706,7 +1709,7 @@ def daily(out: str | Path, *, base: str = ARCHIVE_BASE, warnings_dir: str | Path
     doc = {
         "made": today.strftime("%Y-%m-%dT%H:%M:%SZ"), "date": today.date().isoformat(), "about": ABOUT,
         "method": method_text(), "inputs": res["inputs"], "notes": res["notes"],
-        "usual": res.get("usual") or [],       # carried so a live scan in the browser can leave near-dry areas out
+        "usual": usual,       # carried so a live scan in the browser can leave near-dry areas out
         "picks": [p["id"] for p in picks], "findings": [_public(f) for f in findings],
         "counts": {k: sum(1 for f in findings if f["kind"] == k) for k in KINDS},
         "sources": _sources_used(findings), "seconds": round(time.monotonic() - t0, 1),
