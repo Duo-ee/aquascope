@@ -42,7 +42,7 @@ from aquascope.map_layers import STATUS_CLASSES
 
 __all__ = [
     "ACTION_TYPES", "BASEMAPS", "DIRECTIONS", "EXAMPLES", "LAYERS", "PHOTON_URL", "PLACE_CREDIT", "REGIONS",
-    "ROUTE_DEFAULT_RP", "ROUTE_LIMITS", "ROUTE_SHAPES",
+    "FLOOD_DEFAULT_RP", "FLOOD_FLOWS", "ROUTE_DEFAULT_RP", "ROUTE_LIMITS", "ROUTE_SHAPES",
     "action_schema", "describe_action", "model_command", "model_prompt", "parse_command", "parse_model_reply",
     "reply_schema", "resolve_actions", "resolve_place", "validate_action", "validate_actions",
 ]
@@ -51,12 +51,18 @@ ACTION_TYPES = (
     "fly_to", "set_time", "set_layer", "focus_status", "set_basemap", "highlight_river", "draw_area", "add_pin",
     "route",
     "paint",
+    "flood_reach",
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
 ROUTE_LIMITS = {"peak_cms": (0.0, 1_000_000.0), "return_period": (1.01, 1000.0), "duration_h": (0.0, 720.0)}
 #: The flood routed when the words give no size: the 10-year flow of the reach (GEOGLOWS simulated record).
 ROUTE_DEFAULT_RP = 10.0
+#: Flood it (#658): the flows a flood_reach action may name besides a return period or a number: GEOGLOWS's
+#: forecast peak, its 15-day forecast as a hydrograph, or Route it's wave; and the return period when none is said.
+FLOOD_FLOWS = ("forecast_peak", "forecast", "route")
+FLOOD_DEFAULT_RP = 100.0
+FLOOD_RETURN_PERIODS = (2.0, 500.0)
 DIRECTIONS = ("upstream", "downstream", "both")
 STEPS = ("day", "week", "month")
 STATUS_IDS = tuple(c["id"] for c in STATUS_CLASSES)
@@ -321,7 +327,11 @@ def action_schema(places: list[str] | None = None, layers: list[str] | None = No
                         "shape": {"type": "string", "enum": list(ROUTE_SHAPES),
                                   "description": "route: triangle (a flood) or block (a release)"},
                         "at": {"type": "string", "enum": ["here", "center"],
-                               "description": "route: from the river selected on the map (here)"},
+                               "description": "route, flood_reach: from the river selected on the map (here)"},
+                        "flow_cms": {"type": "number", "description": "flood_reach: a flow at the reach, m3/s"},
+                        "flow": {"type": "string", "enum": list(FLOOD_FLOWS),
+                                 "description": "flood_reach: the forecast peak, the 15-day forecast, or Route "
+                                                "it's wave, instead of a return period"},
                         "label": {"type": "string"},
                         "title": {"type": "string"},
                         "text": {"type": "string"},
@@ -595,6 +605,8 @@ def validate_action(action: Any, today: str | date | None = None) -> tuple[dict[
 
     if kind == "route":
         return _validate_route(action, out, place)
+    if kind == "flood_reach":
+        return _validate_flood(action, out, place)
     if kind == "paint":
         if action.get("question") not in PAINT_QUESTIONS:
             return None, f"paint's question must be one of {', '.join(PAINT_QUESTIONS)}"
@@ -693,6 +705,44 @@ def _validate_route(action: dict[str, Any], out: dict[str, Any], place: str | No
     return out, None
 
 
+def _validate_flood(action: dict[str, Any], out: dict[str, Any], place: str | None
+                    ) -> tuple[dict[str, Any] | None, str | None]:
+    """Flood it (#658): where (a point, a place, or ``at: here``, the river selected on the map) and the flow: a
+    ``return_period`` (2 to 500 years; 100 when none), a ``flow_cms`` at the reach, or a ``flow`` of
+    :data:`FLOOD_FLOWS`. The map computes the flood; the model only chooses these."""
+    point = _latlon(action.get("lat"), action.get("lon"))
+    if point:
+        out["lat"], out["lon"] = point
+    elif place:
+        out["place"] = place
+    elif action.get("at") in ("here", "center"):
+        out["at"] = "here"
+    else:
+        return None, "flood_reach needs a place, a lat and lon, or at: here (the river selected on the map)"
+    flow = action.get("flow")
+    if flow is not None:
+        if flow not in FLOOD_FLOWS:
+            return None, f"flood_reach's flow must be one of {', '.join(FLOOD_FLOWS)}"
+        out["flow"] = flow
+    q = action.get("flow_cms")
+    if q is not None and flow is None:
+        if not _finite(q) or not 0 < float(q) <= 1_000_000:
+            return None, "flood_reach's flow_cms must be above 0 and at most 1,000,000 m3/s"
+        out["flow_cms"] = round(float(q), 3)
+    rp = action.get("return_period")
+    if rp is not None and "flow_cms" not in out and flow in (None, "route"):
+        if not _finite(rp) or not FLOOD_RETURN_PERIODS[0] <= float(rp) <= FLOOD_RETURN_PERIODS[1]:
+            return None, f"flood_reach's return_period must be {FLOOD_RETURN_PERIODS[0]:g} to " \
+                         f"{FLOOD_RETURN_PERIODS[1]:g} years"
+        out["return_period"] = float(rp)
+    if "flow_cms" not in out and flow is None and "return_period" not in out:
+        out["return_period"] = FLOOD_DEFAULT_RP
+    label = _text(action.get("label"), 80)
+    if label:
+        out["label"] = label
+    return out, None
+
+
 def validate_actions(actions: Any, today: str | date | None = None) -> dict[str, Any]:
     """Check a list of actions: ``{"actions": [the ones that passed], "errors": [why the others did not]}``."""
     if isinstance(actions, dict):
@@ -773,6 +823,20 @@ def describe_action(a: dict[str, Any]) -> str:
         else:
             what = f"the {float(a.get('return_period') or ROUTE_DEFAULT_RP):g}-year flood"
         return f"Route {what} over {span} from {where}"
+    if kind == "flood_reach":
+        where = a.get("label") or a.get("place") or ("the selected river" if a.get("at") == "here" else
+                                                     f"{a.get('lat'):.2f}, {a.get('lon'):.2f}")
+        if a.get("flow_cms") is not None:
+            what = f"{float(a['flow_cms']):,.0f} m³/s"
+        elif a.get("flow") == "forecast_peak":
+            what = "the forecast peak"
+        elif a.get("flow") == "forecast":
+            what = "the 15-day forecast"
+        elif a.get("flow") == "route":
+            what = f"Route it's {float(a.get('return_period') or FLOOD_DEFAULT_RP):g}-year wave"
+        else:
+            what = f"the {float(a.get('return_period') or FLOOD_DEFAULT_RP):g}-year flow"
+        return f"Flood {where} at {what}"
     if kind == "paint":
         where = a.get("label") or a.get("place") or ("the box" if a.get("bbox") else "this view")
         return f"Paint {where}: {PAINT_QUESTIONS[a['question']]['label']}"
@@ -1063,6 +1127,43 @@ def _route_phrase(c: _Clause) -> None:
     c.add("route", action)
 
 
+def _flood_phrase(c: _Clause) -> None:
+    """Flood it (#658): "flood Upton upon Severn at the 100-year flow", "flood the Severn at Tewkesbury with 500
+    m3/s", "flood here", "flood this river with the forecast peak", "flood it"."""
+    m = re.search(r"^(?:flood(?:\s+it)?|run\s+flood\s+it|run\s+a\s+screening\s+flood)(?:\s+(?:on|at|of|for))?\s*"
+                  r"(?P<tail>.*)$", c.text)
+    layer_words = r"^(?:depths?|warnings?|ahead|past|risk|layers?|maps?|extents?|zones?|plains?|s\b)"
+    if not m or re.match(layer_words, m.group("tail")):
+        return
+    tail = m.group("tail").strip()
+    action: dict[str, Any] = {"type": "flood_reach"}
+    flow = re.search(r"\s*(?:at|with|for|to)\s+(?:the\s+|a\s+)?(?:(?P<rp>\d{1,3})[- ]?(?:year|yr)s?\s*(?:flow|flood)?"
+                     r"|(?P<q>\d[\d,]*(?:\.\d+)?)\s*" + _FLOW_UNIT +
+                     r"|(?P<peak>forecast(?:ed)?\s+peak|peak\s+of\s+the\s+forecast)"
+                     r"|(?P<fc>(?:15[- ]day\s+)?forecast(?:\s+hydrograph)?)"
+                     r"|(?P<route>route it'?s?\s+wave|routed\s+wave))\s*$", tail)
+    if flow:
+        if flow.group("rp"):
+            action["return_period"] = float(flow.group("rp"))
+        elif flow.group("q"):
+            action["flow_cms"] = float(flow.group("q").replace(",", ""))
+        elif flow.group("peak"):
+            action["flow"] = "forecast_peak"
+        elif flow.group("fc"):
+            action["flow"] = "forecast"
+        elif flow.group("route"):
+            action["flow"] = "route"
+        tail = tail[:flow.start()].strip()
+    if action.get("flow") is None and action.get("flow_cms") is None:
+        action.setdefault("return_period", FLOOD_DEFAULT_RP)
+    if not tail or tail in ("here", "this river", "this reach", "the selected river", "the river", "it"):
+        action["at"] = "here"
+    else:
+        action["place"] = _place_text(_raw_span(c, re.sub(r"^the\s+river\s+", "", tail)))
+    c.text = ""
+    c.add("flood_reach", action)
+
+
 def _river_phrase(c: _Clause) -> None:
     patterns = [
         (r"^(?:show(?: me)?\s+)?(?:the\s+)?(?:way|path|route)\s+(?:of|from)\s+(?:the\s+)?(?P<p>.+?)"
@@ -1250,7 +1351,7 @@ def _place_phrase(c: _Clause) -> None:
 
 
 _ORDER = {k: i for i, k in enumerate(("set_basemap", "set_layer", "focus_status", "set_time", "fly_to", "draw_area",
-                                      "highlight_river", "route", "add_pin", "paint"))}
+                                      "highlight_river", "route", "flood_reach", "add_pin", "paint"))}
 
 
 def _parse_clause(raw: str, today: date) -> _Clause:
@@ -1258,8 +1359,8 @@ def _parse_clause(raw: str, today: date) -> _Clause:
     c.text = re.sub(r"^(?:please|hey|ok|okay|now|can you|could you|would you|i want to|i'd like to|let me|let's)\s+",
                     "", c.text)
     c.text = re.sub(r"\s+(?:please|for me|on the map)$", "", c.text)
-    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _route_phrase,
-                 _river_phrase):
+    for step in (_pin_phrase, _paint_phrase, _zoom_phrase, _basemap_phrase, _area_phrase, _flood_phrase,
+                 _route_phrase, _river_phrase):
         step(c)
         if c.actions:
             return c
@@ -1537,7 +1638,7 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
         if not a.get("place"):
             out.append({k: v for k, v in a.items() if k != "river"})
             continue
-        want = "river" if a.get("river") or a["type"] in ("highlight_river", "route") else "any"
+        want = "river" if a.get("river") or a["type"] in ("highlight_river", "route", "flood_reach") else "any"
         # "the Nile at Khartoum": the river, found where the second place is.
         river_at = re.match(r"^(?P<river>.+?)\s+(?:at|near|by|in)\s+(?P<where>.+)$", a["place"]) \
             if want == "river" else None
@@ -1574,7 +1675,7 @@ def resolve_actions(actions: list[dict[str, Any]], fetch: Any = None) -> dict[st
                 notes.append(f"{a['place']} has no position to start the river from")
                 continue
             b.update(lat=hit["lat"], lon=hit["lon"], label=hit["name"])
-        elif a["type"] == "route":
+        elif a["type"] in ("route", "flood_reach"):
             if hit.get("lat") is None:
                 notes.append(f"{a['place']} has no position to start the flood from")
                 continue
@@ -1683,6 +1784,10 @@ def model_prompt(context: str = "", today: str | date | None = None) -> dict[str
         '- paint: answer one question at every gauge in a region and paint the map with it. "question" among '
         + paint_questions + '; "place" for the region, or none to paint the view. Fly there first. '
         "The numbers are computed by the map, never by you.",
+        '- flood_reach: flood a river\'s valley from a reach (Flood it, a screening flood the map computes). "place" '
+        '(or "lat" and "lon", or "at": "here" for the river selected on the map) and the flow: "return_period" '
+        '(2 to 500 years; 100 when the request gives none), or "flow_cms" (m3/s, only when the reader wrote it), '
+        'or "flow": forecast_peak, forecast (the 15-day forecast) or route (Route it\'s wave).',
         "",
         "Never invent numbers, data or places that were not asked for. "
         "Use place names as the reader wrote them; the map looks them up. Give a bbox or a center only when "

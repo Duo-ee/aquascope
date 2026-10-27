@@ -30,6 +30,7 @@
   <link rel="stylesheet" href="./flood-views.css?v=__BUILD__" />
   <link rel="stylesheet" href="./whatif.css?v=__BUILD__" />
   <link rel="stylesheet" href="./route.css?v=__BUILD__" />
+  <link rel="stylesheet" href="./floodsim.css?v=__BUILD__" />
         </div>
       </section>
   <link rel="stylesheet" href="./paint.css?v=__BUILD__" />
@@ -331,6 +332,15 @@
         </div>
       </section>
       <!-- route it (#656): a flood wave down GEOGLOWS's own river network, on the time bar; src/route-map.js -->
+      <!-- Flood it (#658): the swipe between two runs and the panel, filled by src/floodsim-map.js; floodsim.css -->
+      <div id="fi-swipe" class="wi-swipe" hidden>
+        <span class="wi-sw-line" aria-hidden="true"></span>
+        <span class="wi-sw-label wi-sw-before"></span>
+        <span class="wi-sw-label wi-sw-after"></span>
+        <div class="wi-sw-handle" role="slider" tabindex="0" aria-label="The line between the two runs"
+             aria-valuemin="5" aria-valuemax="95" aria-valuenow="50"><span aria-hidden="true">‹ ›</span></div>
+      </div>
+      <section id="floodit" class="whatif floodit" aria-labelledby="fi-title" hidden></section>
       <section id="route" class="whatif route" aria-labelledby="rt-title" hidden>
         <header class="wi-head">
           <div>

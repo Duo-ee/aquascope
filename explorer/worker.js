@@ -1788,6 +1788,76 @@ json.dumps(_out, default=str)
   post("result", { id, result: JSON.parse(out) });
 }
 
+// ── Flood it (#658): aquascope.floodsim, the same functions as `aquascope flood` and the MCP tool flood_reach.
+// Type "floodsim" (the main worker: the network needs pandas, the valley scipy, the flows' store numcodecs):
+// op "plan" finds the window, the reaches and their flows (kept here for the next ops); op "prepare" takes the
+// window's terrain (a Float32Array the page read from the Terrarium tiles) and returns the grid the GPU or the
+// fallback worker floods: the burnt bed and Manning's n as Float32Arrays, the inflows, the edges and the words;
+// op "forecast" and op "routed" return a hydrograph at the clicked reach.
+let floodsimReady = null;
+async function floodsimOp({ id, op, args, z }) {
+  if (!floodsimReady) floodsimReady = pyodide.loadPackage(["numcodecs"]).catch(() => null);
+  await floodsimReady;
+  pyodide.globals.set("_fs_args", JSON.stringify({ op: String(op || "plan"), args: args || {} }));
+  pyodide.globals.set("_fs_z", z || null);
+  const code = `
+import json
+import numpy as _np
+from aquascope import floodsim as _fs
+_a = json.loads(_fs_args)
+_k = dict(_a["args"])
+_arrays = None
+try:
+    _FS = globals().setdefault("_FS_PLANS", {})
+    if _a["op"] == "plan":
+        _p = _fs.plan_window(_k.get("river_id"), _k.get("lat"), _k.get("lon"))
+        _FS.clear()
+        _FS[str(_p["river_id"])] = _p
+        _out = {"ok": True, "river_id": _p["river_id"], "window": _p["window"], "stem": _p["stem"],
+                "reaches": {r: {"order": v["order"], "curve": v["curve"]} for r, v in _p["reaches"].items()}}
+    elif _a["op"] == "prepare":
+        _p = _FS[str(_k["river_id"])]
+        _zz = _np.frombuffer(_fs_z.to_py(), dtype="<f4").astype("f8")
+        _g = _fs.prepare_grid(_p, _zz, _k.get("choice") or {"return_period": 100}, coarse=bool(_k.get("coarse")))
+        _arrays = {"z": _g["z_burnt"].astype("<f4").ravel(), "n": _g["n"].astype("<f4").ravel(),
+                   "ground": _g["z"].astype("<f4").ravel()}
+        _out = {"ok": True, "window": _g["window"], "nx": _g["nx"], "ny": _g["ny"], "dx": _g["dx"],
+                "sources": [[s["cell"][0], s["cell"][1], s["flow"]] for s in _g["sources"]],
+                "inflows": [{"river_id": s["river_id"], "into": s["into"], "enters": s["enters"], "order": s["order"],
+                             "peak_cms": s["peak"], "q2_cms": s["curve"]["q"][0]} for s in _g["sources"]],
+                "edges": {k: [None if _np.isnan(x) else float(x) for x in v] for k, v in _g["edges"].items()},
+                "exits": _g["exits"], "slope": _g["slope"], "table_dt_s": _g["table_dt_s"], "hours": _g["hours"],
+                "click": {k: v for k, v in _g["click"].items() if k != "curve"}, "label": _g["label"],
+                "coarse": _g["coarse"], "channels": len(_g["channels"]), "reaches": len(_p["reaches"]),
+                "flow_method": _fs.FLOW_METHOD, "licences": _fs.LICENCES}
+    elif _a["op"] == "forecast":
+        _out = {"ok": True, **_fs.forecast_series(int(_k["river_id"]))}
+    elif _a["op"] == "routed":
+        _p = _FS[str(_k["river_id"])]
+        _out = {"ok": True, **_fs.routed_series(_p, float(_k.get("return_period") or 100),
+                                                duration_h=float(_k.get("duration_h") or 24))}
+    else:
+        _out = {"ok": False, "error": "unknown op"}
+except (ValueError, RuntimeError, LookupError, TypeError, KeyError, ImportError) as exc:
+    _out = {"ok": False, "error": str(exc)}
+_fs_out = json.dumps(_out, default=str)
+`;
+  await pyodide.runPythonAsync(code);
+  const result = JSON.parse(pyodide.globals.get("_fs_out"));
+  const transfer = [];
+  const arrays = pyodide.globals.get("_arrays");
+  if (arrays) {
+    for (const key of ["z", "n", "ground"]) {
+      const arr = arrays.get(key);
+      const buf = arr.getBuffer();
+      try { result[key] = new Float32Array(buf.data); transfer.push(result[key].buffer); } finally { buf.release(); arr.destroy(); }
+    }
+    arrays.destroy();
+  }
+  pyodide.globals.set("_fs_z", null);
+  self.postMessage({ type: "result", id, result }, transfer);
+}
+
 self.onmessage = async (e) => {
   const m = e.data;
   try {
@@ -1827,6 +1897,7 @@ self.onmessage = async (e) => {
     if (m.type === "flood_exposure") return await floodExposureOp(m);
     if (m.type === "whatif" || m.type === "whatif_words") return await whatIf(m);
     if (m.type === "route") return await routeOp(m);
+    if (m.type === "floodsim") return await floodsimOp(m);
     if (m.type === "groundwater") return await groundwater(m);
     if (m.type === "gw_layers") return await gwLayers(m);
   } catch (err) {

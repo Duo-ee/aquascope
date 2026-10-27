@@ -917,6 +917,36 @@ def route_flood(river_id: int | None = None, lat: float | None = None, lon: floa
     return res
 
 
+def flood_reach(river_id: int | None = None, lat: float | None = None, lon: float | None = None,
+                return_period: float | None = None, flow_cms: float | None = None, hours: float | None = None,
+                fine: bool = False, out_dir: str | None = None) -> dict[str, Any]:
+    """Flood it (#658): a screening flood of a river's valley from a reach (river_id, or lat/lon to snap). The grid
+    follows the river and is cut to its valley on the Terrarium terrain; every GEOGLOWS reach entering or starting
+    in it is burnt in and fed by its own flow at the same return period as the clicked reach's: return_period
+    years (100 when nothing is given) or flow_cms m3/s there (Log-Pearson III on GEOGLOWS's annual maxima since
+    1940). The local-inertial scheme (LISFLOOD-FP's) runs to a near steady state (wet area and volume each change
+    under 1% in an hour) or the hours cap (72). By default on cells twice as large as the Explorer's GPU grid
+    (fine: the GPU grid, slower in numpy). Returns the wet area, the deepest water, the inflows, when it settled,
+    the volume budget and the licences; out_dir writes the largest depth as a GeoTIFF and the run as a UGRID
+    NetCDF. A screening flood, not a design flood: no bathymetry, terrain errors of metres. Numbers from code."""
+    from pathlib import Path
+
+    from aquascope import floodsim
+
+    out = floodsim.flood_reach(river_id, lat, lon, return_period=return_period, flow_cms=flow_cms, hours=hours,
+                               coarse=not fine)
+    s = out["summary"]
+    if out_dir:
+        folder = Path(out_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = f"flood-{s['river_id']}"
+        s["files"] = {
+            "depth_geotiff": floodsim.to_geotiff(str(folder / f"{stem}-max-depth.tif"), out["grid"],
+                                                 floodsim.depth_over_terrain(out["grid"], out["run"]["h_max"]))["path"],
+            "ugrid_netcdf": floodsim.to_ugrid(str(folder / f"{stem}.nc"), out["grid"], out["run"])["path"]}
+    return s
+
+
 def route_storm(polygon: list[list[float]], rain_mm: float, duration_h: float = 6.0,
                 runoff_coefficient: float = 0.3, hours: int | None = None) -> dict[str, Any]:
     """Route it (#656): a storm over polygon (a ring of [lon, lat]) of rain_mm over duration_h hours, a plain
@@ -1724,6 +1754,7 @@ def build_server():
     server.tool()(whatif_map)
     server.tool()(route_flood)
     server.tool()(route_storm)
+    server.tool()(flood_reach)
     server.tool()(paint_map)
     server.tool()(swmm_summary)
     server.tool()(list_analyses)

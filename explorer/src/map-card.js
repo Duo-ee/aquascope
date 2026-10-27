@@ -419,6 +419,15 @@ function routeButton(t) {
   };
 }
 
+// Flood it (#658): a screening flood of this reach's 100-year flow on the visitor's GPU, drawn on the map.
+function floodItButton(t) {
+  return {
+    id: "floodit", label: "Flood it", hidden: !actions.openFloodIt || !t,
+    title: "A screening flood of the valley at this reach's 100-year flow, every river in view fed, run on your GPU",
+    onClick: () => { if (t && actions.openFloodIt) actions.openFloodIt(t); },
+  };
+}
+
 const studyButton = () => ({
   id: "study", label: "Study", title: "A complete study at this place, planned with you, with a report",
   onClick: () => actions.openStudy({ fresh: true }),
@@ -619,9 +628,10 @@ function onSnap(m, snap) {
     details: () => openDetails("panel-point", "now"),
     // A reach taken from the offer above gets its Trace button back.
     buttons: [traceButton("pt", { ready: Boolean(m.reach) }),
-      ...(m.spec.buttons || []).filter((b) => !["trace", "reach", "whatif", "route"].includes(b.id)),
+      ...(m.spec.buttons || []).filter((b) => !["trace", "reach", "whatif", "route", "floodit"].includes(b.id)),
       routeButton({ river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon, name: named ? named.name : "" }),
-      whatIfButton({ kind: "reach", river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon })],
+      whatIfButton({ kind: "reach", river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon }),
+      floodItButton({ river_id: snap.river_id, lat: snap.snap_lat, lon: snap.snap_lon, order: snap.strahler_order })],
   });
   void loadForecast(m, snap);
 }

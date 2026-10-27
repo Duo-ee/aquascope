@@ -16,6 +16,8 @@ What is here and why (``docs/stability.md`` has the full policy):
 * The map that computes (#664): ``aquascope.routing``, ``aquascope route`` and the MCP tools ``route_flood`` and
   ``route_storm`` (#656), new in 1.1.
 * Paint the globe (#657, after 1.0.0): ``aquascope.paint``, ``aquascope paint`` and the MCP tool ``paint_map``.
+* Flood it (#658): ``aquascope.floodsim`` (a local-inertial screening flood of a river's valley), ``aquascope flood``
+  and the MCP tool ``flood_reach``, new in 1.1.
 * ``aquascope.gym`` and ``aquascope gym``: the benchmark, now called AquaScope Bench (#440). Only the name changed;
   the module path and the CLI verb stay, and the task suite is not frozen before its DOI (#175).
 
@@ -35,6 +37,7 @@ MODULES: tuple[str, ...] = (
     "aquascope.flood_depth",
     "aquascope.flood_exposure",
     "aquascope.flood_section",
+    "aquascope.floodsim",
     "aquascope.flowstatus",
     "aquascope.groundwater.budget",
     "aquascope.groundwater.layers",
@@ -75,6 +78,7 @@ CLI: tuple[str, ...] = (
     "context",
     "evidence",
     "export",
+    "flood",
     "flowstatus",
     "gym",
     "layers",
@@ -107,6 +111,7 @@ MCP_TOOLS: tuple[str, ...] = (
     "explain_view",
     "flood_depth_overlay",
     "flood_events_month",
+    "flood_reach",
     "flood_warnings",
     "flow_forecast",
     "flow_status",

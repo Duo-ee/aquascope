@@ -1,0 +1,50 @@
+/* Flood it (#658): the small panel docked at the side of the map (it shares the What if panel's frame,
+   whatif.css), the flow picker, and on a phone a short sheet. The flood itself is drawn by src/floodsim-map.js. */
+
+.floodit { width: 292px; padding: 10px 12px 10px; max-height: calc(100% - 130px); overflow: auto; }
+.floodit .wi-title { font-size: .9rem; }
+.fi-flows { display: grid; grid-template-columns: repeat(5, 1fr) 1.9fr; gap: 3px; margin-top: .5rem; }
+.fi-chip {
+  font: inherit; font-size: .74rem; line-height: 1.1; padding: .28rem .1rem .22rem; border: 1px solid var(--line);
+  border-radius: var(--radius-xs); background: var(--surface-solid); color: var(--ink); cursor: pointer;
+  display: grid; justify-items: center; gap: 1px; font-variant-numeric: tabular-nums;
+}
+.fi-chip small { font-size: .62rem; color: var(--muted); }
+.fi-chip em { font-style: normal; font-size: .62rem; color: var(--muted); }
+.fi-chip.fi-wide { font-size: .7rem; align-content: center; }
+.fi-chip:hover { background: var(--bg-soft); }
+.fi-chip.on { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, var(--surface-solid)); }
+.fi-chip.on em, .fi-chip.on small { color: var(--ink-2); }
+.fi-more { display: flex; gap: .35rem; margin-top: .35rem; align-items: center; }
+.fi-more select, .fi-num input {
+  font: inherit; font-size: .74rem; padding: .22rem .35rem; border: 1px solid var(--line); border-radius: var(--radius-xs);
+  background: var(--bg); color: var(--ink); min-width: 0;
+}
+.fi-more select { flex: 1.2; }
+.fi-num { display: flex; flex: 1; gap: 3px; }
+.fi-num input { width: 100%; font-variant-numeric: tabular-nums; }
+.fi-flow { margin: .45rem 0 0; font-size: .74rem; line-height: 1.4; color: var(--ink-2); }
+.fi-flow.muted { color: var(--muted); }
+.fi-result { margin-top: .4rem; padding-top: .4rem; border-top: 1px solid var(--line-soft); }
+.fi-head { margin: 0; font-size: .8rem; line-height: 1.4; }
+.fi-head b { font-variant-numeric: tabular-nums; }
+.fi-views { margin: .35rem 0 0; }
+.fi-views .fd-go.on { border-color: var(--blue); }
+.fi-how { margin-top: .35rem; font-size: .72rem; color: var(--ink-2); }
+.fi-how summary { cursor: pointer; color: var(--muted); }
+.fi-how p { margin: .3rem 0 0; line-height: 1.4; }
+.fi-credit { margin: .4rem 0 0; font-size: .66rem; color: var(--muted); line-height: 1.35; }
+.floodit .wi-status .spinner { flex: none; }
+
+/* while the run is open in the flood views: a strip at the top right, so the views' own panels have the map */
+.floodit.mini { top: 64px; bottom: auto; }
+.floodit.mini .fi-more, .floodit.mini .fi-flow, .floodit.mini .fi-how { display: none; }
+
+/* a phone: a bottom sheet, folded to the answer after a run so the flood above shows */
+@media (max-width: 640px) {
+  .floodit { width: auto; max-height: 46vh; }
+  .floodit.done .fi-more, .floodit.done .fi-flow, .floodit.done .fi-credit, .floodit.done .wi-kicker { display: none; }
+  .floodit.done .fi-how { display: none; }
+  .fi-flows { grid-template-columns: repeat(5, 1fr) 1.7fr; }
+  .floodit.mini { top: auto; bottom: 8px; max-height: 22vh; }
+}
