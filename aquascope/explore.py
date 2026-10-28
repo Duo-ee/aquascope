@@ -1648,10 +1648,11 @@ def record_quality_half(
     - ``completeness``: share of the daily calendar between the first and last observation that carries a
       value. The calendar is daily because the catalog and the Archive both report daily values; an
       observation-only series has no holes by construction, so the calendar is what makes a gap visible.
-    - ``longest_gap_days``: the largest step between consecutive observations, in days (a daily record with
-      no missing day is 1, a six-day outage is 7), taken straight from the record's own index.
-      ``assess_quality`` reports the first three gaps it finds in date order, so it cannot be asked for the
-      longest one: three short outages before a long hole would hide the hole.
+    - ``longest_gap_days``: the number of days the longest outage is missing, taken straight from the record's
+      own index: the largest step between consecutive observations minus one, so a daily record with no
+      missing day is 0 and a six-day outage is 6. ``assess_quality`` reports the first three gaps it finds in
+      date order, so it cannot be asked for the longest one: three short outages before a long hole would
+      hide the hole.
     - ``flagged_fraction``: share of observations whose ``quality`` flag is provisional or suspect; 0.0
       when ``quality`` is not given.
     - ``change_points``: the year of a Pettitt shift in the calendar years' means, when there is one. A
@@ -1712,9 +1713,10 @@ def record_quality_half(
     report = assess_quality(observed)
     # The longest gap comes from the index itself, not from ``report.temporal_gaps``: that keeps only the
     # first three gaps per station in date order, so a record with three short outages before a long hole
-    # used to report the short one (#375).
+    # used to report the short one (#375). The count is the days the gap is missing, not the step it spans:
+    # a daily record has no missing day, and a 14-year hole reads as the 5,114 days nobody observed.
     steps = s.index.to_series().diff().dropna()
-    longest_gap = int(steps.max().days) if len(steps) else 0
+    longest_gap = int(steps.max().days) - 1 if len(steps) else 0
     flagged_count = report.quality_counts.get("provisional", 0) + report.quality_counts.get("suspect", 0)
     flagged = round(float(flagged_count) / report.n_records, 4) if report.n_records else 0.0
 
@@ -1913,7 +1915,7 @@ def assess_site(
         day_word = "day" if longest_gap_by[var] == 1 else "days"
         line = (f"{var.replace('_', ' ').capitalize()} record (local Archive mirror): "
                 f"{completeness_by[var]:.1%} of the days between its first and last observation carry a value, "
-                f"longest gap {longest_gap_by[var]:,} {day_word}, "
+                f"at most {longest_gap_by[var]:,} {day_word} missing in one gap, "
                 f"{flagged_by[var]:.1%} flagged provisional or suspect")
         if record_change_points[var]:
             line += ", change point in " + ", ".join(str(y) for y in record_change_points[var])

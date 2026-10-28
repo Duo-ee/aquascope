@@ -258,22 +258,29 @@ def test_record_quality_half_sees_completeness_and_the_long_gap():
     assert complete["completeness"] == 1.0
     assert hole["completeness"] < complete["completeness"]
     assert hole["completeness"] < 0.8
-    assert complete["longest_gap_days"] == 1  # a daily record with no missing day: one step of a day
+    assert complete["longest_gap_days"] == 0  # a daily record with no missing day: nothing missing
     assert hole["longest_gap_days"] > complete["longest_gap_days"]
     assert hole["longest_gap_days"] > 14 * 365
     assert json.loads(json.dumps(hole)) == hole
 
 
+def test_a_single_observation_has_no_gap():
+    """No step exists, so the gap is 0 rather than -1 (the step minus one)."""
+    half = explore.record_quality_half(pd.Series([100.0], index=pd.DatetimeIndex(["2000-01-01"])), "discharge")
+    assert half["longest_gap_days"] == 0
+
+
 def test_the_longest_gap_is_the_long_one_after_three_short_ones():
     """#375 review: three short outages sit before a 14-year hole in date order, and the report said 7 days.
-    The longest gap is the largest step between consecutive observations, taken from the index itself."""
+    The longest gap is the days the longest outage misses, taken from the index itself."""
     whole = _daily_record()
     gappy = whole.drop(whole.loc["1971-01-01":"1984-12-31"].index)
     for start in ("1960-03-01", "1963-07-01", "1967-02-01"):
         gappy = gappy.drop(pd.date_range(start, periods=6))
     half = explore.record_quality_half(gappy, "discharge")
-    # A 6-day outage is a step of 7 days; the three of them come before the hole.
-    assert half["longest_gap_days"] == (pd.Timestamp("1985-01-01") - pd.Timestamp("1970-12-31")).days
+    # A 6-day outage misses 6 days, and the three of them come before the hole, which misses 5,114.
+    assert half["longest_gap_days"] == (pd.Timestamp("1985-01-01") - pd.Timestamp("1970-12-31")).days - 1
+    assert half["longest_gap_days"] == 5114
     assert half["longest_gap_days"] > 14 * 365
 
 
@@ -329,7 +336,7 @@ def test_assess_site_fills_the_quality_half_from_a_local_mirror(small_catalog, a
     res = explore.assess_site(51.415, -0.308, problem="flood_risk")
     ctx = res["context"]
     assert ctx["completeness_by_variable"] == {"discharge": 1.0}
-    assert ctx["longest_gap_days"] == {"discharge": 1}
+    assert ctx["longest_gap_days"] == {"discharge": 0}
     assert ctx["flagged_fraction"]["discharge"] == round(100 / len(index), 4)
     assert ctx["change_points"] == {"discharge": [1991]}
     ffa = _row_for(res, "at_site_flood_frequency")

@@ -92,7 +92,8 @@ class SiteContext:
     #: Share of the record's daily calendar that carries a value, by variable (#375). Empty when the
     #: record itself was not read.
     completeness_by_variable: dict[str, float] = field(default_factory=dict)
-    #: Longest gap between consecutive observations, in days, by variable (#375).
+    #: Days missing in the record's longest outage, by variable (#375): the largest step between consecutive
+    #: observations minus one, so a daily record with no missing day is 0. Empty when the record was not read.
     longest_gap_days: dict[str, int] = field(default_factory=dict)
     #: Share of observations flagged provisional or suspect, by variable (#375).
     flagged_fraction: dict[str, float] = field(default_factory=dict)
