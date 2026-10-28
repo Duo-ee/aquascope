@@ -32,7 +32,7 @@ import { clearMesh, currentMesh, onMeshCleared, openModelFile, runMeshTool } fro
 import { setMeshLens } from "./mesh-views.js?v=__BUILD__";
 import {
   FLOODSIM_CREDIT, LABEL, WET_M, corners, depthOverTerrain, pxLonLat, runLoop, summary, terrariumElevation, ugridFile,
-  unpackDepth, wetAtWall, wetBox, windowTiles,
+  unpackDepth, wallContact, wallWords, wetBox, windowTiles, hm, flowLine, clockLabel, clockSummary, depthTag,
 } from "./floodsim-core.js?v=__BUILD__";
 import { createGpuSim, gpuAvailable } from "./floodsim-gpu.js?v=__BUILD__";
 import {
@@ -72,10 +72,6 @@ const EXPO = "floodsim-expo";
 const RAMP = packedRamp(STOPS, 64);
 
 const panel = () => $("floodit");
-const hm = (s) => {
-  const m = Math.round(s / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
-};
 const q = (v) => `${fmt(v, v >= 100 ? 0 : v >= 10 ? 0 : 1)} m³/s`;
 const phone = () => (globalThis.innerWidth || 1024) <= 640;
 
@@ -223,7 +219,8 @@ export async function floodIt(t, { choice = { return_period: 100 }, by = "rules"
     run.hMax = res.hMax;
     run.over = depthOverTerrain(res.hMax, g.z, g.ground);
     run.stats = summary(run.over, g.dx);
-    run.atWall = wetAtWall(run.over, g.nx, g.ny, g.edges, g.sources);
+    run.wall = wallContact(run.over, g.nx, g.ny, g.edges, g.sources);
+    run.atWall = run.wall.held;
     run.scale = { lo: 0, hi: niceCeil(Math.max(quantile(run.over, 0.99), 0.5)), sqrt: true };
     const before = slotValue("floodsim");
     status = null;
@@ -240,6 +237,7 @@ export async function floodIt(t, { choice = { return_period: 100 }, by = "rules"
     globalThis.__aq.floodIt.last = () => ({ engine: run.engine, wall_s: run.wall_s, first_frame_s: run.first_s, steps: run.steps,
       steady_at_h: run.steadyAt ? run.steadyAt / 3600 : null, hours: run.t / 3600, cells: g.nx * g.ny, dx: g.dx,
       wet_km2: run.stats.wet_km2, max_m: run.stats.max_m, sources: g.sources.length, coarse: g.coarse, at_wall: run.atWall,
+      wall: run.wall,
       edits: run.editInfo });
     return run;
   } catch (err) {
@@ -355,8 +353,9 @@ function show(run, { fit = false, step = null } = {}) {
   const at = step === null ? last : step;
   paintStep(run, at);
   useModelClock({
-    times: run.frames.map((f) => f.t), index: at, label: (i) => `+${hm(run.frames[i].t)}`,
-    summary: `Flood it: the ${run.label}, model time${run.steadyAt ? `, steady after ${hm(run.steadyAt)}` : ""}.`,
+    times: run.frames.map((f) => f.t), index: at,
+    label: (i) => clockLabel(run.frames[i].t, { steady: run.steady, steadyAt: run.steadyAt, last: i === last }),
+    summary: clockSummary(run.label, { steady: run.steady, steadyAt: run.steadyAt }),
     onStep: (i) => { if (shown === run) paintStep(run, i); },
     onExit: () => { if (shown === run) paintStep(run, last); },
   });
@@ -555,9 +554,8 @@ function render() {
   const name = target ? (target.name || `River reach ${target.river_id}`) : "River reach";
   const chips = CHOICES.map((T) => chip(T, cur, curve)).join("");
   const fc = cur && cur.forecast === "peak";
-  const about = run && run.g.click.return_period && !run.choice.return_period ? `, about the ${fmt(run.g.click.return_period, 0)}-year flow` : "";
-  const flowLine = run ? `<p class="fi-flow"><b>${escapeHtml(cap(run.words))}</b>${about} ` +
-    `at this reach (${q(run.g.click.flow_cms)}). Every river in view at the same return period: ${run.g.sources.length} inflows.</p>` :
+  const fl = run ? flowLine(run, q) : null;
+  const flowHtml = run ? `<p class="fi-flow"><b>${escapeHtml(cap(fl.words))}</b>${escapeHtml(fl.rest)}</p>` :
     (curve ? `<p class="fi-flow muted">Flows: ${escapeHtml(designFlowWords(curve))}.</p>` : "");
   const st = status ? `<p class="wi-status${status.kind === "error" ? " error" : ""}" role="status">${status.kind === "busy" || /…$/.test(status.text) ? '<span class="spinner" aria-hidden="true"></span>' : ""}${escapeHtml(status.text)}</p>` : "";
   let result = "";
@@ -571,6 +569,7 @@ function render() {
       ? `<button type="button" class="fd-go${swipe.on ? " on" : ""}" data-act="swipe" aria-pressed="${swipe.on}" title="A swipe between this run and the ${escapeHtml(comparable.at(-1).label)}">Compare with ${escapeHtml(comparable.at(-1).label)}</button>` : "";
     result = `<div class="fi-result">
       <p class="fi-head"><b>${fmt(s.wet_km2, 1)} km²</b> under water, ${escapeHtml(head)}; deepest ${fmt(s.max_m, 1)} m.</p>
+      ${run.atWall ? `<p class="fi-wall" role="note">${escapeHtml(wallWords(run.wall, run.g.dx))}</p>` : ""}
       <p class="mv-actions fi-views"><span>Look closer</span>
         <button type="button" class="fd-go" data-act="hazard" title="Hazard H1 to H6 from depth and speed (AIDR Guideline 7-3)">Hazard</button>
         <button type="button" class="fd-go" data-act="arrival" title="When each place first has 10 cm of water">Arrival</button>
@@ -581,7 +580,7 @@ function render() {
         <p>${escapeHtml(run.engine)}: ${fmt(run.steps, 0)} steps on ${fmt(run.g.nx * run.g.ny, 0)} cells of ${fmt(run.g.dx, 1)} m in ${fmt(run.wall_s, 1)} s${run.first_s ? ` (first frame after ${fmt(run.first_s, 1)} s)` : ""}.
         ${run.g.coarse ? "Without WebGPU the worker runs cells twice as large and stops at 48 h." : `A steady run stops when the wet area and the volume each change by under 1% in an hour, or at ${CAP_GPU_H} h.`}
         The grid follows the river and is cut to its valley; walls all round but where the river leaves (a normal-depth outfall).
-        ${run.atWall ? "<b>Water reached a wall of the grid: the valley may be wider than the grid there.</b>" : ""}</p>
+</p>
         <p>${escapeHtml(JRC_LINE)} <a href="${DOCS}" target="_blank" rel="noopener">The checks</a></p>
       </details>
     </div>`;
@@ -600,7 +599,7 @@ function render() {
   panel().innerHTML = `<header class="wi-head"><div><p class="wi-kicker">Flood it · screening flood</p>
       <h2 id="fi-title" class="wi-title">${escapeHtml(name)}</h2></div>
       <button type="button" class="wi-close" data-act="close" aria-label="Close Flood it" title="Close and take the flood off the map">×</button></header>
-    ${picker}${flowLine}${st}${result}${run && !status ? sketchBlock(run) : ""}
+    ${picker}${flowHtml}${st}${result}${run && !status ? sketchBlock(run) : ""}
     <p class="fi-credit">${escapeHtml(LABEL)}. ${inViews && currentMesh() ? '<button type="button" class="link-btn" data-act="back">Back to Flood it</button> · ' : ""}<button type="button" class="link-btn" data-act="clear">Clear</button></p>`;
   panel().classList.toggle("done", Boolean(run && !status));
   panel().classList.toggle("crest", Boolean(run && !status && pending));
@@ -645,7 +644,7 @@ function registerRow() {
       const sc = shown.scale;
       const t = ticks(sc).map((k) => `<span style="left:${k.at}%">${escapeHtml(k.label)}</span>`).join("");
       const f = shown.frames[shown.step ?? shown.frames.length - 1];
-      return `<p class="fd-tag">Depth ${f ? `at +${escapeHtml(hm(f.t))}` : ""} of the ${escapeHtml(shown.label)}, a screening flood</p>` +
+      return `<p class="fd-tag">${escapeHtml(depthTag(shown.label, f ? f.t : null, { steady: shown.steady }))}</p>` +
         `<div class="fd-ramp" role="img" aria-label="Depth from 0 to ${sc.hi} m, light to deep blue" style="background:${rampCss()}"></div>` +
         `<div class="fd-ticks" aria-hidden="true">${t}<em>m</em></div>` +
         `<p class="fd-src">${escapeHtml(FLOODSIM_CREDIT)}</p>`;

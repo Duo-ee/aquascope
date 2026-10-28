@@ -1230,10 +1230,13 @@ def cmd_flood(args: argparse.Namespace) -> None:
         print(json.dumps(s, indent=2, ensure_ascii=False, default=str))
         return
     steady = f"steady after {s['steady_at_h']:g} h" if s["steady_at_h"] else f"run for {s['hours_run']:g} h"
-    print(f"  Reach {s['river_id']}: {s['flow']} ({s['flow_cms']:,.0f} m³/s here), {len(s['sources'])} inflows at the "
-          f"same return period.")
+    here = f"{s['flow_cms']:,.0f} m³/s"
+    flow = s["flow"] if here in s["flow"] else f"{s['flow']} ({here} here)"
+    print(f"  Reach {s['river_id']}: {flow}, {len(s['sources'])} inflows at the same return period.")
     print(f"  {s['wet_km2']:,.2f} km² under water, deepest {s['max_depth_m']:.1f} m, {steady}; {s['nx']} x {s['ny']} "
           f"cells of {s['cell_m']:.1f} m, {s['steps']:,} steps in {s['wall_s']:.0f} s.")
+    if s.get("wall_contact", {}).get("held"):
+        print(f"  {floodsim.wall_words(s['wall_contact'], s['cell_m'])}")
     for e in s.get("edits", []):
         if e["kind"] == "levee":
             print(f"  Levee at {e['crest_m']:g} m ({e['height_m'][0]:g} to {e['height_m'][1]:g} m above the ground), "

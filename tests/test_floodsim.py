@@ -518,3 +518,31 @@ def test_design_flow_reads_the_reach_curve(monkeypatch):
         fs.design_flow(7, 1.5)
     with pytest.raises(RuntimeError):
         fs.design_flow(8, 100)
+
+
+WALL_WORDS_N = ("The water reaches the grid's north edge along 120 m, away from the rivers. The valley goes on past "
+                "the grid there and the edge holds the water like a wall, so near it the flood is deeper and narrower "
+                "than it would be. To see that part, flood a reach closer to it.")
+
+
+def test_the_wall_is_said_only_when_the_flood_is_held_there():
+    """The same grid and rule as explorer/tests/floodsim-core.test.mjs's wallContact test."""
+    nx, ny = 12, 10
+    e = np.where((np.arange(ny) >= 3) & (np.arange(ny) <= 6), 0.001, 0.0)
+    edges = fs.edge_codes(ny, nx, closed=True, edges={"e": e})
+    src = [{"cell": (5, 0)}]
+    h = np.zeros((ny, nx))
+    h[0, 6:10] = 0.4
+    w = fs.wall_contact(h, edges, src, near=2)
+    assert w["held"] and w["sides"]["n"] == 4 and w["faces"] == 4
+    assert fs.wall_words(w, 30.0) == WALL_WORDS_N
+    h[:] = 0
+    h[0, 6:10] = 0.06
+    assert not fs.wall_contact(h, edges, src, near=2)["held"]
+    h[:] = 0
+    h[2:8, -1] = 1.0
+    assert not fs.wall_contact(h, edges, src, near=2)["held"]
+    h[:] = 0
+    h[3:7, 0] = 1.0
+    assert not fs.wall_contact(h, edges, src, near=2)["held"]
+    assert fs.wall_words({"held": False}, 30.0) == ""

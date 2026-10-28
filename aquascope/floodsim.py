@@ -54,13 +54,14 @@ import numpy as np
 
 __all__ = [
     "ALPHA", "CAP_HOURS", "G", "H_DRY", "N_CHANNEL", "N_FLOODPLAIN", "RETURN_PERIODS", "STEADY_TOL", "THETA",
-    "TERRARIUM", "WEIR_C", "annual_maxima", "apply_breach", "apply_levee", "burn_channel", "compare_exposure",
+    "TERRARIUM", "WALL_RULE", "WEIR_C", "annual_maxima", "apply_breach", "apply_levee", "burn_channel",
+    "compare_exposure",
     "compare_runs", "design_flow", "edit_grid", "edits_from", "levee_profile", "read_line", "supercover_cells",
     "weir_flow",
     "cell_velocity", "channel_depth", "compare_depths", "corridor",
     "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "flow_words", "forecast_series",
     "frame_times",
-    "depth_over_terrain", "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
+    "depth_over_terrain", "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid", "wall_contact", "wall_words",
     "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "reach_curve", "return_period_for", "ritter",
     "run_grid",
     "run_summary", "simulate", "stream_reaches", "terrain_grid", "terrain_window", "terrarium_elevation", "window",
@@ -1713,12 +1714,69 @@ def depth_over_terrain(g: dict[str, Any], h: Any) -> np.ndarray:
     return np.maximum(np.asarray(g["z_burnt"]) + np.asarray(h) - np.asarray(g["z"]), 0.0)
 
 
+#: When the flood is held by a wall of the grid (:func:`wall_contact`): water deeper than ``wet_m`` behind a walled
+#: edge face, further than ``near`` cells from an inflow and ``gap`` faces from an open edge, at ``min_faces`` faces
+#: or more. The Explorer's ``floodsim-core.js`` (``WALL_RULE``, ``wallContact``) uses the same numbers.
+WALL_RULE = {"wet_m": 0.1, "near": 40, "gap": 3, "min_faces": 3}
+
+
+def wall_contact(depth: Any, edges: dict[str, Any], sources: list[Any], **rule: Any) -> dict[str, Any]:
+    """Where a run's flood is held by a wall of its grid: the walled edge faces (code 0) with water deeper than the
+    rule's ``wet_m`` behind them, away from the rivers that enter (``near`` cells, Chebyshev) and from the open edges
+    where the river leaves (``gap`` faces). There the valley goes on past the grid, and the wall holds water that
+    would spread, so the flood near it is deeper and narrower than it would be. ``depth`` is above the terrain
+    (rows north to south); ``sources`` are ``(row, col)`` cells or dicts with ``"cell"``. Returns ``faces``,
+    ``sides`` (faces per side) and ``held`` (``min_faces`` or more)."""
+    r_ = {**WALL_RULE, **rule}
+    d = np.asarray(depth, dtype="f8")
+    ny, nx = d.shape
+    cells = [tuple(s["cell"]) if isinstance(s, dict) else tuple(s[:2]) for s in sources]
+    near, gap = int(r_["near"]), int(r_["gap"])
+
+    def far(r: int, c: int) -> bool:
+        return all(max(abs(sr - r), abs(sc - c)) > near for sr, sc in cells)
+
+    sides = {}
+    for k, n_faces, cell in (("n", nx, lambda i: (0, i)), ("s", nx, lambda i: (ny - 1, i)),
+                             ("w", ny, lambda i: (i, 0)), ("e", ny, lambda i: (i, nx - 1))):
+        code = np.broadcast_to(np.asarray(edges.get(k, FREE) if edges else FREE, dtype="f8"), (n_faces,))
+        count = 0
+        for i in range(n_faces):
+            if code[i] != 0:
+                continue
+            lo, hi = max(0, i - gap), min(n_faces, i + gap + 1)
+            if np.any(code[lo:hi] != 0):    # NaN (free) and a slope (normal depth) are open
+                continue
+            r, c = cell(i)
+            if d[r, c] > float(r_["wet_m"]) and far(r, c):
+                count += 1
+        sides[k] = count
+    faces = sum(sides.values())
+    return {"faces": faces, "sides": sides, "held": faces >= int(r_["min_faces"])}
+
+
+def wall_words(contact: dict[str, Any], dx: float) -> str:
+    """:func:`wall_contact`'s warning in plain words, or "" when the flood is not held by a wall: what it means and
+    what to do (the Explorer's ``wallWords`` writes the same)."""
+    if not contact or not contact.get("held"):
+        return ""
+    names = {"n": "north", "s": "south", "w": "west", "e": "east"}
+    order = sorted(((k, v) for k, v in contact["sides"].items() if v > 0), key=lambda kv: -kv[1])
+    where = [names[k] for k, _ in order]
+    km = contact["faces"] * float(dx) / 1000.0
+    along = f"{km:.1f} km" if km >= 1 else f"{round(km * 1000)} m"
+    sides = (f"{', '.join(where[:-1])} and {where[-1]} edges" if len(where) > 1 else f"{where[0]} edge")
+    return (f"The water reaches the grid's {sides} along {along}, away from the rivers. The valley goes on past the "
+            "grid there and the edge holds the water like a wall, so near it the flood is deeper and narrower than it "
+            "would be. To see that part, flood a reach closer to it.")
+
+
 def run_summary(g: dict[str, Any], res: dict[str, Any], wet_m: float = 0.05) -> dict[str, Any]:
     """The numbers a card or a JSON file gives for a run (depths above the terrain, :func:`depth_over_terrain`)."""
     hm = depth_over_terrain(g, res["h_max"])
     wet = hm > wet_m
     dx = g["dx"]
-    edge_wet = bool(wet[0, :].any() or wet[-1, :].any() or wet[:, 0].any() or wet[:, -1].any())
+    held = wall_contact(hm, g["edges"], g["sources"])
     return {
         "river_id": g["click"]["river_id"], "flow": g["label"], "flow_cms": g["click"]["flow_cms"],
         "return_period": g["click"]["return_period"], "hours_run": round(res["t_s"] / 3600.0, 2),
@@ -1732,7 +1790,7 @@ def run_summary(g: dict[str, Any], res: dict[str, Any], wet_m: float = 0.05) -> 
                      "peak_cms": s["peak"]} for s in g["sources"]],
         "exits": g["exits"], "channel_slope": g["slope"], "steps": res["steps"],
         "wall_s": round(res["wall_s"], 2), "volume": {k: round(v, 3) for k, v in res["volume"].items()},
-        "water_at_walled_edge": edge_wet and not g["exits"],
+        "water_at_walled_edge": held["held"], "wall_contact": held,
         **({"edits": [{k: v for k, v in e.items() if k != "cells"} | {"cells": len(e["cells"])}
                       for e in g["edits"]]} if g.get("edits") else {}),
         "label": LABEL, "method": SCHEME, "flows_from": FLOW_METHOD, "licences": LICENCES,
