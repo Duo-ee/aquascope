@@ -18,6 +18,7 @@ import { STREAMS_PMTILES } from "./river-core.js?v=__BUILD__";
 import { clearRiverNetwork, clearRiverTrace } from "./river-map.js?v=__BUILD__";
 import { releaseModelClock, setModelStep, useModelClock } from "./time-ui.js?v=__BUILD__";
 import { call } from "./worker-client.js?v=__BUILD__";
+import { designFlowLine } from "./design-flow-core.js?v=__BUILD__";
 import {
   RAMP, busiestFrame, cardPlaces, flatterWords, flowWords, frameFeatureStates, frameLabel, headline, hoursWords, logLabel,
   pathFilterExpr, placeFeatures, reachedBounds, routeArgs, townsFrom, waveColorExpr, waveOpacityExpr, waveWidthExpr,
@@ -273,7 +274,8 @@ function renderResult() {
       '<span class="rt-q">m³/s</span><span class="rt-flat">flatter</span></li>' + rows.map(placeRow).join("")
     : '<li class="rt-none">No town or gauge on the stretch the wave reached in view.</li>';
   const check = r.check && r.check.summary ? ` ${r.check.summary}` : "";
-  $("rt-model").textContent = `Muskingum, GEOGLOWS's own k and x, ${r.hours} h routed hourly.${check} ` +
+  const flow = designFlowLine(r.inflow && r.inflow.design);
+  $("rt-model").textContent = `${flow ? `${flow} ` : ""}Muskingum, GEOGLOWS's own k and x, ${r.hours} h routed hourly.${check} ` +
     "The flow the wave adds to the river; rivers that join add their own.";
 }
 
@@ -425,7 +427,8 @@ function legendBody() {
   return `<p class="ml-when">${escapeHtml(when)}: the share of ${escapeHtml(ref)} ` +
     "that is there, wider and darker for more.</p>" +
     `<p class="rk-row"><span class="rt-ramp">${ramp}</span> 0 to 100%</p>` +
-    '<p class="ml-src">Muskingum with GEOGLOWS v2\'s k and x (CC BY 4.0), rivers TDX-Hydro (CC BY-SA 4.0). Modelled.</p>';
+    '<p class="ml-src">Muskingum with GEOGLOWS v2\'s k and x (CC BY 4.0), rivers TDX-Hydro (CC BY-SA 4.0)' +
+    (r.inflow && r.inflow.design ? ", T-year flows from GEOGLOWS v2's annual maxima (CC BY-NC-SA 4.0)" : "") + '. Modelled.</p>';
 }
 
 function registerRow() {

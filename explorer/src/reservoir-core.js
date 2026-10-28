@@ -35,7 +35,7 @@ export function reservoirArgs({ crest_m, top_m, width_m, kind = "rp", return_per
     out.peak_cms = q;
   } else {
     const rp = Number(return_period);
-    if (!(rp >= 1.01 && rp <= 1000)) throw new Error("the return period must be between 1.01 and 1000 years");
+    if (!(rp >= 2 && rp <= 500)) throw new Error("the return period must be between 2 and 500 years");
     out.return_period = rp;
   }
   return out;

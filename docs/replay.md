@@ -22,7 +22,11 @@ the data; no model writes one.**
    between stops, and the scrubber jumps to any stop. The time bar moves with the story.
 3. **Export or share.** Behind **⋯**: **Make a GIF** (one frame a stop, the note and the credits on each), **Record a
    video** (WebM, where the browser has MediaRecorder), **The report** (Markdown with every number, its source, its
-   licence and its coverage) and **Copy the link** (`#rp=river_id,start,end,lat,lon`, which replays the same flood).
+   licence and its coverage) and **Copy the link** (`#rp=river_id,start,end,lat,lon,reports`, which replays the same
+   story on a fresh page: the reach it was made on, the window, the place and, for a Floods past event, its number of
+   news reports). Both were checked headless (Chrome, 2026-10-28): the video of the Severn's ten stops is a 44 MB WebM
+   (VP9) in about two minutes, and the link, opened on a fresh page, plays the same ten stops with the same notes.
+   The Floods past card is kept inside the map as its events and Replay buttons arrive.
 
 Ask the map does the same from words: "replay the Severn flood of November 2024", "replay the flood of September 2024
 at Asheville", "replay the November 2024 flood here". The model, when one is used, picks the place and the month; the
@@ -52,7 +56,11 @@ when it is not available (the story then says so at that stop and goes on).
 
 - **The event and the river.** A Floods past candidate (`candidates`: the Groundsource news reports within 40 km in the
   month, grouped into runs of days, a gap of more than two days starting a new one) gives the dates and a centre; the
-  river is the largest (highest Strahler order, the nearer on a tie) within 12 km of it. The window read is 8 days
+  river is the main river near it (`replay.main_river`): of GEOGLOWS's reaches within 25 km, the river with the largest
+  upstream area, at its reach nearest the centre. A tributary nearer the centre is not taken for it: Storm Bert's
+  191 reports in the 40 km around 52.05° N, 2.30° W centre on 52.09° N, 2.49° W, 11.9 km from a Strahler order 5
+  stream and 18 km from the Severn; the Severn (6,992 km² there) is the river. Where the network cannot be read, the
+  highest Strahler order within 12 km stands. The window read is 8 days
   before the first report to 6 after the last, at most 45 days.
 - **The gauges.** The Archive's discharge gauges within 30 km, each snapped to the GEOGLOWS reach it stands on (by its
   catalogued catchment area where a tributary joins beside it), kept when that reach is on the event's river (its main
@@ -120,8 +128,8 @@ The numbers below are the code's; each is checked against its source.
 ### The Severn, Storm Bert, November 2024
 
 `aquascope replay --at 51.95 -2.2 --month 2024-11` takes Floods past's most reported flood there (169 news reports
-from 19 to 29 November, centred about 11 km west of the Severn), and the largest river within 12 km is the Severn at Upton (reach
-230567275, Strahler order 6, 10.8 km away).
+from 19 to 29 November, centred about 11 km west of the Severn), and the main river is the Severn at Upton (reach
+230567275, 6,884 km² upstream, 10.8 km away).
 
 | Piece | The note's number | Checked against | Result |
 | --- | --- | --- | --- |
@@ -136,8 +144,8 @@ from 19 to 29 November, centred about 11 km west of the Severn), and the largest
 
 ### Hurricane Helene, the French Broad at Asheville, September 2024
 
-`aquascope replay --at 35.58 -82.56 --month 2024-09`: 195 reports from 23 September to 3 October; the river within 12 km
-is the French Broad (reach 760658432); the nearest gauge on it with a record is the USGS gauge at Asheville
+`aquascope replay --at 35.58 -82.56 --month 2024-09`: 195 reports from 23 September to 3 October; the main river within
+25 km is the French Broad (reach 760658432, 2,420 km² upstream); the nearest gauge on it with a record is the USGS gauge at Asheville
 (03451500), on reach 760585214.
 
 | Piece | The note's number | Checked against | Result |

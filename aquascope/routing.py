@@ -313,21 +313,14 @@ def _check_inputs(duration_h: Any, hours: Any, shape: str) -> tuple[float, int |
     return d, h
 
 
-def _rp_flow(river_id: int, return_period: float) -> tuple[float, str]:
-    """The reach's ``return_period``-year flow from its GEOGLOWS simulated record (GEV by L-moments on the
-    annual maxima of daily flow, :func:`aquascope.rivers.reach_record`)."""
-    from aquascope import rivers
+def _rp_flow(river_id: int, return_period: float) -> tuple[float, str, dict[str, Any]]:
+    """The reach's ``return_period``-year flow: :func:`aquascope.floodsim.design_flow`, the design flow every tool
+    shares (Log-Pearson III on GEOGLOWS v2's annual maxima, as Flood it)."""
+    from aquascope import floodsim
 
-    rec = rivers.reach_record(river_id, return_periods=[float(return_period)])
-    if rec.get("error"):
-        raise RuntimeError(rec["error"])
-    fit = (((rec.get("ffa") or {}).get("fits") or {}).get("gev_lmoments") or {})
-    q = (fit.get("q_by_T") or {}).get(f"{float(return_period):g}")
-    if q is None or not math.isfinite(float(q)):
-        raise RuntimeError("no flood frequency fit for this reach's simulated record")
-    n_years = (rec.get("ffa") or {}).get("n_years")
-    return float(q), (f"the {float(return_period):g}-year flow of this reach, {float(q):,.0f} m³/s (GEV by "
-                      f"L-moments on {n_years} years of GEOGLOWS simulated daily flow)")
+    d = floodsim.design_flow(river_id, return_period)
+    q = float(d["flow_cms"])
+    return q, f"the {d['return_period']:g}-year flow of this reach, {q:,.0f} m³/s ({d['words']})", d
 
 
 # ── the answer per reach ────────────────────────────────────────────────────
@@ -474,7 +467,8 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
     """A flood wave from a reach down its river to the sea: what arrives where, when, and how flat.
 
     Water enters at the downstream end of ``river_id`` (or the reach snapped at ``lat``/``lon``): a hydrograph
-    with ``peak_cms`` (or the reach's ``return_period``-year flow, from its GEOGLOWS simulated record) of
+    with ``peak_cms`` (or the reach's ``return_period``-year flow, 2 to 500 years, from
+    :func:`aquascope.floodsim.design_flow`) of
     ``shape`` (``triangle`` or ``block``, a release) over ``duration_h`` hours. It is routed reach by reach down
     the path with GEOGLOWS's own k and x for ``hours`` (by default long enough for the peak to reach the last
     reach followed, at most 30 days). ``max_reaches`` caps the path.
@@ -499,6 +493,7 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
     from aquascope import rivers
 
     series_in = None
+    design: dict[str, Any] | None = None
     if inflow_cms is not None:
         series_in = np.asarray([float(v) for v in inflow_cms], dtype=float)
         if not (2 <= len(series_in) <= MAX_HOURS + 1) or not np.all(np.isfinite(series_in)) or series_in.min() < 0:
@@ -529,10 +524,7 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
             raise ValueError("peak_cms must be above 0 and at most 1,000,000 m3/s")
         source = f"{peak:,.0f} m³/s set by hand"
     else:
-        rp = float(return_period)  # type: ignore[arg-type]
-        if not (1.01 <= rp <= 1000):
-            raise ValueError("return_period must be between 1.01 and 1000 years")
-        peak, source = _rp_flow(rid, rp)
+        peak, source, design = _rp_flow(rid, float(return_period))  # type: ignore[arg-type]
     net = rivers._network_for(rid, lat, lon)
     k, x, ds_index = _params(net)
     i0 = net.index(rid)
@@ -569,14 +561,17 @@ def route(river_id: int | str | None = None, *, lat: float | None = None, lon: f
     res: dict[str, Any] = {
         "ok": True, "river_id": rid, "vpu": net.vpu, "snap": snap,
         "inflow": {"peak_cms": round(peak, 2), "duration_h": d, "shape": shape, "source": source,
-                   "volume_m3": _sig(volume), "return_period": return_period},
+                   "volume_m3": _sig(volume), "return_period": return_period, "design": design},
         "hours": n_steps, "dt_s": DT_S, "n_reaches": len(path), "truncated": truncated,
         "reaches": rows,
         "furthest": {"river_id": ids[last], "index": last, **{kk: rows[last][kk] for kk in
                                                              ("peak_cms", "peak_h", "front_h", "attenuation_pct")}},
         "method": METHOD, "check": {"summary": CHECK["summary"], "tolerance": CHECK["tolerance"]},
-        "notes": [NOTE_LINEAR, NOTE_MODEL], "attribution": ATTRIBUTION, "licence": LICENCE, "modelled": True,
+        "notes": [NOTE_LINEAR, NOTE_MODEL], "attribution": ATTRIBUTION, "licence": dict(LICENCE), "modelled": True,
     }
+    if design is not None:
+        res["licence"]["flows"] = f"{design['licence']} (GEOGLOWS v2 annual maxima)"
+        res["attribution"] = f"{ATTRIBUTION} T-year flows: GEOGLOWS v2 annual maxima, {design['licence']}."
     if truncated:
         res["notes"].append(f"Followed {len(path):,} reaches; the river goes on.")
     if frames:

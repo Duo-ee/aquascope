@@ -241,6 +241,33 @@ def test_a_flood_that_misses_the_dam_says_so(toy, monkeypatch):
     assert res["ok"] is False and "does not reach the dam" in res["error"]
 
 
+def test_the_reservoir_and_flood_it_read_the_same_design_flow(toy, monkeypatch):
+    """The same reach and the same T give the same m3/s in Draw a reservoir and Flood it: both read
+    floodsim.design_flow's Log-Pearson III curve on GEOGLOWS's annual maxima (#664 follow-up)."""
+    years = list(range(1940, 2025))
+    rng = np.random.default_rng(11)
+    am = {rid: np.exp(rng.normal(np.log(50.0 * (i + 1)), 0.35, len(years))) for i, rid in enumerate(IDS.values())}
+    monkeypatch.setattr(fs, "annual_maxima", lambda rids, fetch=None: (years, {int(r): am[int(r)] for r in rids
+                                                                              if int(r) in am}))
+    win, z, ring = _flat_lake(monkeypatch)
+    dam = {"river_id": IDS["B"], "order": 3, "lon": 8.1, "lat": 47.1, "downstream_id": IDS["C"]}
+    reaches = {IDS["A"]: {"order": 3, "lines": [[(8.2, 47.0), (8.25, 47.05)]]},
+               IDS["B"]: {"order": 3, "lines": [[(8.25, 47.05), (8.3, 47.1)]]},
+               IDS["C"]: {"order": 4, "lines": [[(8.3, 47.1), (8.4, 47.2)]]}}
+    for t in (10, 100):
+        res = rv.route_reservoir(ring, z=z, window=win, dam=dam, crest_m=5.0, top_m=12.0, width_m=10.0,
+                                 return_period=t, duration_h=24, hours=120)
+        assert res["ok"]
+        plan = fs.plan_window(IDS["B"], net=toy, reaches=reaches, zoom=12, km=20)
+        curve = (plan["reaches"].get(IDS["B"]) or plan["reaches"][str(IDS["B"])])["curve"]
+        flood_it = fs.flow_for(curve, t)
+        design = fs.design_flow(IDS["B"], t)
+        assert res["inflow"]["peak_cms"] == pytest.approx(flood_it, abs=0.01)
+        assert res["reservoir"]["peak_in_cms"] == pytest.approx(flood_it, rel=0.01)
+        assert design["flow_cms"] == pytest.approx(flood_it, abs=0.001)
+        assert design["words"] in res["reservoir"]["what"] and curve["method"] == design["method"]
+
+
 # ── the CLI and MCP faces ────────────────────────────────────────────────────
 
 

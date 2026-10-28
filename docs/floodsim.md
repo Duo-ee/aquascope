@@ -79,6 +79,11 @@ These are the same values as the yearly maxima of the API's daily record that th
 reach 230567275: all 85 years agree; the 100-year flow is 343 m³/s from the store's 85 years and 341 m³/s from the API's
 86). The store's own licence is CC BY-NC-SA 4.0.
 
+**One design flow.** `aquascope.floodsim.design_flow(river_id, T)` is this curve read at T (2 to 500 years), and every
+tool that asks for a T-year flow uses it: Flood it, Route it, Draw a reservoir and Replay. The same reach and the same
+T give the same m³/s in each, and each card names it the same way ("Log-Pearson III on GEOGLOWS v2's annual maxima of
+simulated daily flow, 1940 to 2024"; `flow_words`, and `design-flow-core.js` in the Explorer).
+
 **The same return period.** The flow chosen at the clicked reach is carried to every inflow at the same return period:
 its return period on the clicked reach's curve, read in log(T) between the fitted points, gives each inflow's flow on
 its own curve. Below the 2-year flow, and above the 500-year, each inflow gets the same share of its own 2-year (or
@@ -117,6 +122,20 @@ volume on the grid have each changed by under 1% since the last check, or to a c
 48 on the worker. The cap is long enough for every reach checked below (the slowest, the Ahr, settled at 66 h), and a
 run that meets it says so. A hydrograph runs to its end instead. Frames are kept every 15 minutes for three hours, then
 hourly, and drawn as they come.
+
+**The clock.** A steady run is not a day of real time: the time bar counts the hours since the water was turned on
+("5 h into a steady run", and its last frame "steady after 27 h"), and says so ("Flood it: hours since the water
+was turned on"). A hydrograph's run counts from the hydrograph's start ("+5 h"). The card names the flow once: "954 m³/s at this reach", or "the 100-year flow at
+this reach (343 m³/s)".
+
+**When the valley is wider than the grid.** The grid is cut to the valley around the click, with walls where the
+river does not leave. If the water stands against a wall away from the rivers that enter it (deeper than 10 cm, more
+than 40 cells from an inflow and 3 cells from an open edge, along 3 cell faces or more; `floodsim.wall_contact` and
+`WALL_RULE`, the same rule in the Explorer), the card says so under the result: the valley goes on past the grid
+there and the wall holds the water, so near it the flood is deeper and narrower than it would be; flooding a reach
+closer to that edge shows it. The CLI prints the same sentence and the JSON has `wall_contact`. At Upton upon Severn
+at 954 m³/s it is said for the grid's east edge, along 3.9 km of the Avon's valley near Bredon: the flood there
+stops on a straight line.
 
 **Depths** on the map, in the panel and in the files are the water above the terrain the map is drawn from: the depth
 over the burnt bed less the channel's cut. Off the channels the two are the same.

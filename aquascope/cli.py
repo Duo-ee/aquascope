@@ -1230,10 +1230,13 @@ def cmd_flood(args: argparse.Namespace) -> None:
         print(json.dumps(s, indent=2, ensure_ascii=False, default=str))
         return
     steady = f"steady after {s['steady_at_h']:g} h" if s["steady_at_h"] else f"run for {s['hours_run']:g} h"
-    print(f"  Reach {s['river_id']}: {s['flow']} ({s['flow_cms']:,.0f} m³/s here), {len(s['sources'])} inflows at the "
-          f"same return period.")
+    here = f"{s['flow_cms']:,.0f} m³/s"
+    flow = s["flow"] if here in s["flow"] else f"{s['flow']} ({here} here)"
+    print(f"  Reach {s['river_id']}: {flow}, {len(s['sources'])} inflows at the same return period.")
     print(f"  {s['wet_km2']:,.2f} km² under water, deepest {s['max_depth_m']:.1f} m, {steady}; {s['nx']} x {s['ny']} "
           f"cells of {s['cell_m']:.1f} m, {s['steps']:,} steps in {s['wall_s']:.0f} s.")
+    if s.get("wall_contact", {}).get("held"):
+        print(f"  {floodsim.wall_words(s['wall_contact'], s['cell_m'])}")
     for e in s.get("edits", []):
         if e["kind"] == "levee":
             print(f"  Levee at {e['crest_m']:g} m ({e['height_m'][0]:g} to {e['height_m'][1]:g} m above the ground), "
@@ -5314,7 +5317,8 @@ def main() -> None:
     p_rf.add_argument("river", nargs="?", type=int, default=None, help="A GEOGLOWS v2 river_id")
     p_rf.add_argument("--at", nargs=2, type=float, metavar=("LAT", "LON"), help="Snap this point first")
     p_rf.add_argument("--peak", type=float, default=None, help="The peak flow entering, m3/s")
-    p_rf.add_argument("--rp", type=float, default=None, help="Or the reach's T-year flow (GEOGLOWS simulated record)")
+    p_rf.add_argument("--rp", type=float, default=None, help="Or the reach's T-year flow, 2 to 500 years "
+                      "(Log-Pearson III on GEOGLOWS's annual maxima, as Flood it)")
     p_rf.add_argument("--duration", type=float, default=24.0, help="Hours the water enters for (24)")
     p_rf.add_argument("--shape", choices=["triangle", "block"], default="triangle",
                       help="triangle (peaks at a third of the duration) or block (a release)")
@@ -5380,7 +5384,8 @@ def main() -> None:
     p_rr.add_argument("--width", type=float, default=30.0, help="The spillway's width, m (30)")
     p_rr.add_argument("--coefficient", type=float, default=None,
                       help="The weir coefficient, SI (a broad-crested weir, about 1.705)")
-    p_rr.add_argument("--rp", type=float, default=None, help="The T-year flow entering (GEOGLOWS simulated record)")
+    p_rr.add_argument("--rp", type=float, default=None, help="The T-year flow entering, 2 to 500 years "
+                      "(Log-Pearson III on GEOGLOWS's annual maxima, as Flood it)")
     p_rr.add_argument("--peak", type=float, default=None, help="Or a peak flow entering, m3/s")
     p_rr.add_argument("--duration", type=float, default=24.0, help="Hours the flood enters over (24)")
     p_rr.add_argument("--from", dest="from_river", type=int, default=None,

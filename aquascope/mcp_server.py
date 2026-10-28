@@ -897,13 +897,14 @@ def whatif_map(river_id: int | None = None, lat: float | None = None, lon: float
 def route_flood(river_id: int | None = None, lat: float | None = None, lon: float | None = None,
                 peak_cms: float | None = None, return_period: float | None = None, duration_h: float = 24.0,
                 shape: str = "triangle", hours: int | None = None, places: bool = True) -> dict[str, Any]:
-    """Route it (#656): a flood wave entering at a river reach (river_id, or lat/lon to snap), routed down GEOGLOWS
-    v2's own network to the sea with Muskingum and GEOGLOWS's k and x per reach. The water entering is peak_cms
-    (m3/s) or the reach's return_period-year flow (GEV on its simulated record), shaped as a triangle (peaks at a
-    third of duration_h) or a block (a release, constant for duration_h hours). Returns per reach the added peak,
-    the hour of the peak, the wave's front and the attenuation, and (places) the Archive gauges on the path with
-    the wave where each stands. Muskingum is linear: these are the flows the wave adds to what the river carries.
-    Modelled, numbers from code; checked against GEOGLOWS's own hourly retrospective (the check is in the answer)."""
+    """Route it (#656): a flood wave entering at a river reach (river_id, or lat/lon to snap), routed down GEOGLOWS v2's
+    own network to the sea with Muskingum and GEOGLOWS's k and x per reach. The water entering is peak_cms (m3/s) or the
+    reach's return_period-year flow (2 to 500 years; Log-Pearson III on GEOGLOWS's annual maxima, as Flood it), shaped
+    as a triangle (peaks at a third of duration_h) or a block (a release, constant for duration_h hours). Returns per
+    reach the added peak, the hour of the peak, the wave's front and the attenuation, and (places) the Archive gauges on
+    the path with the wave where each stands. Muskingum is linear: these are the flows the wave adds to what the river
+    carries. Modelled, numbers from code; checked against GEOGLOWS's own hourly retrospective (the check is in the
+    answer)."""
     from aquascope.routing import route
 
     res = route(river_id, lat=lat, lon=lon, peak_cms=peak_cms, return_period=return_period, duration_h=duration_h,
@@ -1068,7 +1069,8 @@ def route_reservoir(polygon: list[list[float]], crest_m: float = 10.0, top_m: fl
     """Sketchpad (#662): a reservoir drawn as polygon (a ring of [lon, lat]) across a GEOGLOWS v2 river, a flood
     routed through it with level-pool (storage-indication) routing and on down the river with Route it. The storage
     is the Terrarium terrain inside the polygon; the outflow a broad-crested spillway width_m wide with its crest
-    crest_m above the lowest ground (top_m: the top of the dam). The flood: return_period or peak_cms over
+    crest_m above the lowest ground (top_m: the top of the dam). The flood: return_period (2 to 500 years, the
+    flow Flood it reads) or peak_cms over
     duration_h entering at the dam's reach (or from_river_id upstream), or a storm (storm_polygon, rain_mm,
     storm_duration_h, runoff_coefficient). Returns the reservoir's inflow and outflow hydrographs at the dam, the
     peak reduction and delay, the highest level and storage, the run without the reservoir for comparison, and

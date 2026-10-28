@@ -444,10 +444,14 @@ function save(name, blob) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
+// The link names the reach the story was made on (so it does not depend on the river picker), the window, the place
+// and, for a Floods past event, its reports: a fresh page replays the same story.
 function shareLink() {
   if (!cur) return "";
-  const e = cur.story.event;
-  const ev = cur.args.river_id ? { ...cur.args } : { river_id: e.river_id, start: e.start, end: e.end, lat: e.lat, lon: e.lon };
+  const e = cur.story.event, a = cur.args || {}, fe = a.event || {};
+  const pick = (...v) => v.find((x) => x !== undefined && x !== null && x !== "");
+  const ev = { river_id: pick(a.river_id, e.river_id), start: pick(fe.start, a.start, e.start), end: pick(fe.end, a.end, e.end),
+    lat: pick(fe.lat, a.lat, e.lat), lon: pick(fe.lon, a.lon, e.lon), reports: pick(fe.reports) };
   return `${location.origin}${location.pathname}#rp=${encodeReplay(ev)}`;
 }
 

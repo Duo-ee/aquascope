@@ -247,7 +247,13 @@ function frameLake() {
   const wide = [[w - dx, s - dy], [e + dx, n + dy]];
   const p = panel(), phone = globalThis.matchMedia && matchMedia("(max-width: 640px)").matches;
   const pad = { top: 90, left: 40, right: 40, bottom: 60 };
-  if (p && !p.hidden) { if (phone) pad.bottom = Math.min(p.offsetHeight + 24, map.getContainer().clientHeight * 0.5); else pad.right = p.offsetWidth + 40; }
+  if (p && !p.hidden) {
+    if (phone) {
+      // a bottom sheet (sketch.css): keep the lake, and its corners to drag, above the sheet's top edge
+      const r = p.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
+      pad.bottom = Math.min(Math.max(c.bottom - r.top + 24, pad.bottom), c.height * 0.6);
+    } else pad.right = p.offsetWidth + 40;
+  }
   try { map.fitBounds(wide, { padding: pad, maxZoom: 13, duration: 0 }); } catch { /* the map is not ready */ }
 }
 

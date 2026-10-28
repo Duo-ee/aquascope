@@ -437,6 +437,10 @@ downstream gets the hour it arrives and how big it is. On a river reach's map ca
 gauge's, once its river is found), **Route a flood** opens a small panel: what enters the
 river (the reach's 2-, 10-, 25- or 100-year flow, or a number in m³/s), over how many hours,
 and whether it is a flood (a triangle that peaks at a third of the time) or a steady release.
+The T-year flow is the one design flow every tool shares (`aquascope.floodsim.design_flow`):
+Log-Pearson III on GEOGLOWS v2's annual maxima of simulated daily flow since 1940
+(CC BY-NC-SA 4.0), as [Flood it](floodsim.md) and [Draw a reservoir](sketchpad.md#draw-a-reservoir)
+read it; the card names it on its last line.
 
 ![Route a flood on a river's map card](img/globe/route-card.png)
 

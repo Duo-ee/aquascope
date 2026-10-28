@@ -205,7 +205,7 @@ export function routeArgs({ kind, peak, rp, duration, block }) {
     out.peak_cms = q;
   } else {
     const t = Number(rp);
-    if (!(t >= 1.01 && t <= 1000)) throw new Error("the return period must be between 1.01 and 1000 years");
+    if (!(t >= 2 && t <= 500)) throw new Error("the return period must be between 2 and 500 years");
     out.return_period = t;
   }
   return out;

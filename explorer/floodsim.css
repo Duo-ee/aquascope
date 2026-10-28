@@ -28,6 +28,7 @@
 .fi-result { margin-top: .4rem; padding-top: .4rem; border-top: 1px solid var(--line-soft); }
 .fi-head { margin: 0; font-size: .8rem; line-height: 1.4; }
 .fi-head b { font-variant-numeric: tabular-nums; }
+.fi-wall { margin: .3rem 0 0; font-size: .72rem; line-height: 1.4; color: var(--warn-ink, #8a5a00); }
 .fi-views { margin: .35rem 0 0; }
 .fi-views .fd-go.on { border-color: var(--blue); }
 .fi-how { margin-top: .35rem; font-size: .72rem; color: var(--ink-2); }
@@ -42,7 +43,10 @@
 
 /* a phone: a bottom sheet, folded to the answer after a run so the flood above shows */
 @media (max-width: 640px) {
-  .floodit { width: auto; max-height: 46vh; }
+  /* a bottom sheet above the hint and the time bar (as the sketchpad's), so the run's clock stays in view; the
+     camera keeps the flood above the sheet (floodsim-map.js padding()) */
+  .floodit { width: auto; top: auto; bottom: 150px; max-height: 40vh; }
+  .floodit.done { max-height: 34vh; }
   .floodit.done .fi-more, .floodit.done .fi-flow, .floodit.done .fi-credit, .floodit.done .wi-kicker { display: none; }
   .floodit.done .fi-how { display: none; }
   .fi-flows { grid-template-columns: repeat(5, 1fr) 1.7fr; }

@@ -63,8 +63,8 @@ ACTION_TYPES = (
 )
 #: Route it (#656): the shapes of the water entering, and the bounds a route action is held to.
 ROUTE_SHAPES = ("triangle", "block")
-ROUTE_LIMITS = {"peak_cms": (0.0, 1_000_000.0), "return_period": (1.01, 1000.0), "duration_h": (0.0, 720.0)}
-#: The flood routed when the words give no size: the 10-year flow of the reach (GEOGLOWS simulated record).
+ROUTE_LIMITS = {"peak_cms": (0.0, 1_000_000.0), "return_period": (2.0, 500.0), "duration_h": (0.0, 720.0)}
+#: The flood routed when the words give no size: the 10-year flow of the reach (floodsim.design_flow).
 ROUTE_DEFAULT_RP = 10.0
 #: Flood it (#658): the flows a flood_reach action may name besides a return period or a number: GEOGLOWS's
 #: forecast peak, its 15-day forecast as a hydrograph, or Route it's wave; and the return period when none is said.

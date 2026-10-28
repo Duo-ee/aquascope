@@ -51,6 +51,12 @@ test("the share link carries the reach, the window and the place, and reads back
   assert.equal(decodeReplay("#rp=12,nope"), null);
   assert.equal(decodeReplay("#rp=,2024-09-27"), null);
   assert.equal(decodeReplay("#s=usgs/1"), null);
+  // A Floods past event keeps its reports, so a fresh page replays the same story (#664 follow-up).
+  const e = encodeReplay({ river_id: 230564005, start: "2024-11-19", end: "2024-11-29", lat: 52.04958, lon: -2.20047, reports: 102 });
+  assert.equal(e, "230564005,2024-11-19,2024-11-29,52.0496,-2.2005,102");
+  assert.deepEqual(decodeReplay(`#rp=${e}`), { river_id: 230564005, start: "2024-11-19", end: "2024-11-29", lat: 52.0496, lon: -2.2005,
+    reports: 102, event: { start: "2024-11-19", end: "2024-11-29", lat: 52.0496, lon: -2.2005, reports: 102 } });
+  assert.equal(encodeReplay({ river_id: 230564005, start: "2024-11-19", end: "2024-11-29", reports: 102 }), "230564005,2024-11-19,2024-11-29");
 });
 
 test("the assembling list says each piece's state", () => {

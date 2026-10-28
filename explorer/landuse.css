@@ -28,7 +28,11 @@
 
 @media (max-width: 640px) {
   .landuse { width: auto; }
-  .landuse.done .lu-form, .landuse.done .wi-sub { display: none; }
-  .landuse.done { max-height: 46vh; }
+  .landuse.done .lu-form, .landuse.done .wi-sub, .landuse.done .wi-kicker, .landuse.done .wi-status { display: none; }
+  /* after a run: a short bottom sheet above the hint and the time bar, as the storm's and the reservoir's, so the
+     area drawn shows above it (landuse-map.js frames it there) */
+  .landuse.done { top: auto; bottom: 150px; max-height: 34vh; overflow: auto; }
+  .landuse.done .lu-table { font-size: .7rem; margin-bottom: .25rem; }
+  .landuse.done .rt-head { font-size: .74rem; }
   .landuse .lu-key { display: none; }
 }
