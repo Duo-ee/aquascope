@@ -7,6 +7,9 @@ All notable changes to AquaScope are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Archive health reports identify partial BOM station catalogs and large station-count drops** (#289). Partial requests appear as non-fatal warnings; count comparisons require an unrestricted run and a previous catalog explicitly marked complete.
+
 ### Fixed
 - **Cite 1.1.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.1.0's Zenodo DOI (10.5281/zenodo.23718093).
 
