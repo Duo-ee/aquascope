@@ -124,8 +124,8 @@ run that meets it says so. A hydrograph runs to its end instead. Frames are kept
 hourly, and drawn as they come.
 
 **The clock.** A steady run is not a day of real time: the time bar counts the hours since the water was turned on
-("5 h into a steady run", and its last frame "steady after 27 h"), and says so ("Flood it at 954 m³/s: hours since
-the water was turned on, not dates"). A hydrograph's run counts from the hydrograph's start ("+5 h"). The card names the flow once: "954 m³/s at this reach", or "the 100-year flow at
+("5 h into a steady run", and its last frame "steady after 27 h"), and says so ("Flood it: hours since the water
+was turned on"). A hydrograph's run counts from the hydrograph's start ("+5 h"). The card names the flow once: "954 m³/s at this reach", or "the 100-year flow at
 this reach (343 m³/s)".
 
 **When the valley is wider than the grid.** The grid is cut to the valley around the click, with walls where the

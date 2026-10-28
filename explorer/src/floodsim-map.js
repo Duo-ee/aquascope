@@ -355,7 +355,7 @@ function show(run, { fit = false, step = null } = {}) {
   useModelClock({
     times: run.frames.map((f) => f.t), index: at,
     label: (i) => clockLabel(run.frames[i].t, { steady: run.steady, steadyAt: run.steadyAt, last: i === last }),
-    summary: clockSummary(run.label),
+    summary: clockSummary({ steady: run.steady }),
     onStep: (i) => { if (shown === run) paintStep(run, i); },
     onExit: () => { if (shown === run) paintStep(run, last); },
   });

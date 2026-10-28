@@ -65,9 +65,9 @@ export function clockLabel(t, { steady = false, steadyAt = null, last = false } 
   return `${hm(t)} into a steady run`;
 }
 
-/** The time bar's note for a run (short: on a phone it sits under the sheet). */
-export function clockSummary(label) {
-  return `Flood it at ${theLabel(label)}: hours since the water was turned on, not dates.`;
+/** The time bar's note for a run (short: on a phone it sits under the sheet; the run's flow is on the card). */
+export function clockSummary({ steady = true } = {}) {
+  return steady ? "Flood it: hours since the water was turned on." : "Flood it: hours from the hydrograph's start.";
 }
 
 /** The legend's line over the depth ramp. */

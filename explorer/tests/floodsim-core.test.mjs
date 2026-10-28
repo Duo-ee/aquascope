@@ -151,7 +151,8 @@ test("the run's words: the flow once, a steady run's clock, the wall said only w
   assert.equal(clockLabel(5 * 3600, { steady: true, steadyAt: 27 * 3600 }), "5 h into a steady run");
   assert.equal(clockLabel(27 * 3600, { steady: true, steadyAt: 27 * 3600, last: true }), "steady after 27 h");
   assert.equal(clockLabel(5 * 3600, { steady: false }), "+5 h");
-  assert.equal(clockSummary("954 m³/s"), "Flood it at 954 m³/s: hours since the water was turned on, not dates.");
+  assert.equal(clockSummary({ steady: true }), "Flood it: hours since the water was turned on.");
+  assert.equal(clockSummary({ steady: false }), "Flood it: hours from the hydrograph's start.");
   assert.equal(depthTag("100-year flow", 3600, { steady: true }), "Depth after 1 h of a steady run at the 100-year flow, a screening flood");
   // The wall: a 12 x 10 grid walled all round but an outfall on the east; water against the north wall far from the inflow.
   const nx = 12, ny = 10, h = new Float64Array(nx * ny);
