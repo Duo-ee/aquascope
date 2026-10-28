@@ -520,9 +520,9 @@ def test_design_flow_reads_the_reach_curve(monkeypatch):
         fs.design_flow(8, 100)
 
 
-WALL_WORDS_N = ("The water reaches the grid's north edge along 120 m, away from the rivers. The valley goes on past "
-                "the grid there and the edge holds the water like a wall, so near it the flood is deeper and narrower "
-                "than it would be. To see that part, flood a reach closer to it.")
+WALL_WORDS_N = ("The water reaches the grid's north edge along 120 m. The valley goes on past it, and the edge holds "
+                "the water like a wall, so the flood there is deeper and narrower than it would be. Flood a reach "
+                "nearer that edge to see it.")
 
 
 def test_the_wall_is_said_only_when_the_flood_is_held_there():

@@ -151,7 +151,7 @@ test("the run's words: the flow once, a steady run's clock, the wall said only w
   assert.equal(clockLabel(5 * 3600, { steady: true, steadyAt: 27 * 3600 }), "5 h into a steady run");
   assert.equal(clockLabel(27 * 3600, { steady: true, steadyAt: 27 * 3600, last: true }), "steady after 27 h");
   assert.equal(clockLabel(5 * 3600, { steady: false }), "+5 h");
-  assert.match(clockSummary("954 m³/s", { steady: true, steadyAt: 27 * 3600 }), /^Flood it: 954 m³\/s, a steady run: .*not dates\.$/);
+  assert.equal(clockSummary("954 m³/s"), "Flood it at 954 m³/s: hours since the water was turned on, not dates.");
   assert.equal(depthTag("100-year flow", 3600, { steady: true }), "Depth after 1 h of a steady run at the 100-year flow, a screening flood");
   // The wall: a 12 x 10 grid walled all round but an outfall on the east; water against the north wall far from the inflow.
   const nx = 12, ny = 10, h = new Float64Array(nx * ny);
@@ -161,9 +161,9 @@ test("the run's words: the flow once, a steady run's clock, the wall said only w
   let w = wallContact(h, nx, ny, edges, [[5, 0]], rule);
   assert.equal(w.held, true); assert.equal(w.sides.n, 4);
   // the same words as tests/test_floodsim.py's WALL_WORDS_N
-  assert.equal(wallWords(w, 30), "The water reaches the grid's north edge along 120 m, away from the rivers. The valley goes on " +
-    "past the grid there and the edge holds the water like a wall, so near it the flood is deeper and narrower than it would " +
-    "be. To see that part, flood a reach closer to it.");
+  assert.equal(wallWords(w, 30), "The water reaches the grid's north edge along 120 m. The valley goes on past it, and the " +
+    "edge holds the water like a wall, so the flood there is deeper and narrower than it would be. Flood a reach nearer that " +
+    "edge to see it.");
   h.fill(0);
   for (let c = 6; c < 10; c++) h[c] = 0.06;                 // a film under 10 cm: not held
   assert.equal(wallContact(h, nx, ny, edges, [[5, 0]], rule).held, false);

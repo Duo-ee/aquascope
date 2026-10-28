@@ -1766,9 +1766,9 @@ def wall_words(contact: dict[str, Any], dx: float) -> str:
     km = contact["faces"] * float(dx) / 1000.0
     along = f"{km:.1f} km" if km >= 1 else f"{round(km * 1000)} m"
     sides = (f"{', '.join(where[:-1])} and {where[-1]} edges" if len(where) > 1 else f"{where[0]} edge")
-    return (f"The water reaches the grid's {sides} along {along}, away from the rivers. The valley goes on past the "
-            "grid there and the edge holds the water like a wall, so near it the flood is deeper and narrower than it "
-            "would be. To see that part, flood a reach closer to it.")
+    return (f"The water reaches the grid's {sides} along {along}. The valley goes on past it, and the edge holds the "
+            "water like a wall, so the flood there is deeper and narrower than it would be. Flood a reach nearer that "
+            "edge to see it.")
 
 
 def run_summary(g: dict[str, Any], res: dict[str, Any], wet_m: float = 0.05) -> dict[str, Any]:

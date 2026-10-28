@@ -65,12 +65,9 @@ export function clockLabel(t, { steady = false, steadyAt = null, last = false } 
   return `${hm(t)} into a steady run`;
 }
 
-/** The time bar's note for a run. */
-export function clockSummary(label, { steady = false, steadyAt = null } = {}) {
-  const what = `Flood it: ${theLabel(label)}`;
-  if (!steady) return `${what}, hours from the hydrograph's start.`;
-  return `${what}, a steady run: the flow is held until the flood stops growing${steadyAt ? ` (after ${hm(steadyAt)})` : ""}. ` +
-    "The bar counts hours since the water was turned on, not dates.";
+/** The time bar's note for a run (short: on a phone it sits under the sheet). */
+export function clockSummary(label) {
+  return `Flood it at ${theLabel(label)}: hours since the water was turned on, not dates.`;
 }
 
 /** The legend's line over the depth ramp. */
@@ -505,9 +502,8 @@ export function wallWords(contact, dx) {
   const km = (contact.faces * dx) / 1000;
   const along = km >= 1 ? `${km.toFixed(1)} km` : `${Math.round(km * 1000)} m`;
   const sides = where.length > 1 ? `${where.slice(0, -1).join(", ")} and ${where.at(-1)} edges` : `${where[0]} edge`;
-  return `The water reaches the grid's ${sides} along ${along}, away from the rivers. The valley goes on past the grid ` +
-    "there and the edge holds the water like a wall, so near it the flood is deeper and narrower than it would be. " +
-    "To see that part, flood a reach closer to it.";
+  return `The water reaches the grid's ${sides} along ${along}. The valley goes on past it, and the edge holds the ` +
+    "water like a wall, so the flood there is deeper and narrower than it would be. Flood a reach nearer that edge to see it.";
 }
 
 // ── the hand-off to the flood views: a UGRID NetCDF-3 file ─────────────────

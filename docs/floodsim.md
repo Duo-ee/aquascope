@@ -124,8 +124,8 @@ run that meets it says so. A hydrograph runs to its end instead. Frames are kept
 hourly, and drawn as they come.
 
 **The clock.** A steady run is not a day of real time: the time bar counts the hours since the water was turned on
-("5 h into a steady run") and its last frame says when it settled ("steady after 27 h"). A hydrograph's run counts
-from the hydrograph's start ("+5 h"). The card names the flow once: "954 m³/s at this reach", or "the 100-year flow at
+("5 h into a steady run", and its last frame "steady after 27 h"), and says so ("Flood it at 954 m³/s: hours since
+the water was turned on, not dates"). A hydrograph's run counts from the hydrograph's start ("+5 h"). The card names the flow once: "954 m³/s at this reach", or "the 100-year flow at
 this reach (343 m³/s)".
 
 **When the valley is wider than the grid.** The grid is cut to the valley around the click, with walls where the
@@ -133,7 +133,9 @@ river does not leave. If the water stands against a wall away from the rivers th
 than 40 cells from an inflow and 3 cells from an open edge, along 3 cell faces or more; `floodsim.wall_contact` and
 `WALL_RULE`, the same rule in the Explorer), the card says so under the result: the valley goes on past the grid
 there and the wall holds the water, so near it the flood is deeper and narrower than it would be; flooding a reach
-closer to that edge shows it. The CLI prints the same sentence and the JSON has `wall_contact`.
+closer to that edge shows it. The CLI prints the same sentence and the JSON has `wall_contact`. At Upton upon Severn
+at 954 m³/s it is said for the grid's east edge, along 3.9 km of the Avon's valley near Bredon: the flood there
+stops on a straight line.
 
 **Depths** on the map, in the panel and in the files are the water above the terrain the map is drawn from: the depth
 over the burnt bed less the channel's cut. Off the channels the two are the same.
