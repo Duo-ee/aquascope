@@ -249,10 +249,10 @@ function frame(res) {
   }
   if (p && !p.hidden) {
     if (narrow()) {
-      // a sheet: at the bottom while it asks, at the top once it answers (route.css); keep the area in the rest
+      // a bottom sheet (landuse.css): keep the area above its top edge
       const r = p.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
-      if (r.top - c.top < c.height / 3) pad.top = Math.min(r.bottom - c.top + 16, c.height * 0.6);
-      else pad.bottom = Math.min(c.bottom - r.top + 16, c.height * 0.6);
+      pad.bottom = Math.min(Math.max(c.bottom - r.top + 32, pad.bottom), c.height * 0.6);
+      pad.top = Math.min(pad.top, c.height * 0.15);
     } else pad.right = p.offsetWidth + 50;
   }
   try { map.fitBounds(box, { padding: pad, maxZoom: 14, duration: 600 }); } catch { /* not ready */ }

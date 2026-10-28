@@ -20,6 +20,9 @@
 /* Draw a storm (#670) */
 .storm .wi-slider input[type="number"] { max-width: 6rem; }
 .storm .wi-slider:first-of-type output { color: var(--muted); text-align: left; }
+/* the reservoir's three values (crest, dam top, spillway) are alike: one column, one colour */
+.reservoir .wi-slider output, .reservoir .wi-slider:first-of-type output, .reservoir .wi-slider:last-of-type output {
+  color: var(--ink); font-size: .74rem; text-align: right; }
 .storm.drawing { opacity: .55; pointer-events: none; }
 .st-plain { margin: .1rem 0 0; font-size: .7rem; color: var(--muted); }
 .st-chart { display: block; width: 100%; height: auto; margin: .2rem 0 .1rem; overflow: visible; }
