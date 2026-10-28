@@ -111,6 +111,15 @@ flow arrows, drawdown, capture zones, the layers in 3D, cross-sections and the w
 Samples are one click away, and the files never leave your browser
 ([mesh](docs/mesh.md), [MODFLOW](docs/modflow.md)).
 
+**A map that computes:** click a river and **Route it** sends a flood wave down GEOGLOWS's own
+network, **Flood it** floods the valley at a design flow in your browser (draw a levee or a
+breach and run again), and **Replay** plays a past flood as a story: the rain, the gauge
+against the model, what the forecast said, the wave and the flood. The sketchpad draws a storm,
+a reservoir, a pumping well or a land-use change on the map and recomputes as you drag, and
+**Paint the globe** answers one question at every gauge in view. Each model is checked against
+a published example or reference data ([Flood it](docs/floodsim.md), [replay](docs/replay.md),
+[sketchpad](docs/sketchpad.md), [paint](docs/paint.md)).
+
 **Study** guides you from a question through a plan you approve to a report and export
 bundle: Word, Excel, figures, notebook, findings and study YAML. Core studies run without
 an API key. Optional model setup is available when you choose to use it. Beyond the design
@@ -441,6 +450,10 @@ aquascope eval stats studies/ --by model             # many studies at once: gra
 aquascope area-study --bbox=-0.9,51.2,0.3,51.8       # a flood study over every gauge in a box: Q100, flood trends, a regional curve
 aquascope paint --bbox=-8,49.8,2,59                    # paint every Archive gauge in a box with its flood trend, plus field significance
 aquascope replay --at 51.95 -2.2 --month 2024-11       # a past flood as a story: rain, gauge vs model, forecast, wave, flood
+aquascope route flood 230301988 --peak 2000             # a flood wave down GEOGLOWS's river network
+aquascope flood 230567275 --flow 954 --levee ring.geojson --crest 15.1   # a screening flood of the valley, with a drawn levee
+aquascope well --at 4.88 45.76 --rate 1000 --days 90   # Theis drawdown round a pumping well
+aquascope landuse --polygon '[[4.955,45.70],[4.97,45.70],[4.97,45.708],[4.955,45.708]]' --use residential_1_8 --rain 100
 
 # Interactive Streamlit dashboard — multipage workspace with 37 live sources,
 # smart auto-insights, and fully interactive Plotly charts
@@ -609,8 +622,8 @@ If you use AquaScope in your research, please cite:
   author  = {Ouédraogo, Abdoul Rachid},
   year    = {2026},
   url     = {https://github.com/Rekin226/aquascope},
-  version = {1.0.0},
-  doi     = {10.5281/zenodo.23671741},
+  version = {1.1.0},
+  doi     = {10.5281/zenodo.21903143},
   license = {MIT}
 }
 ```
