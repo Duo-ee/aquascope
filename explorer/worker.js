@@ -1762,7 +1762,17 @@ json.dumps(_out, default=str)
 // routes water entering at a reach down its path to the sea, with the gauges (the page's catalog) and the towns
 // the page read off the basemap placed on the way; op "places" places more towns on a result's path (the page reads
 // them once the path is framed); op "storm" routes a drawn storm's runoff.
+// The T-year flows (floodsim.design_flow) read GEOGLOWS's annual maxima store, which needs numcodecs: loaded once,
+// the first time a run asks for a return period.
+let maximaReady = null;
+async function maximaCodec(args) {
+  if (!args || args.return_period == null) return;
+  if (!maximaReady) maximaReady = pyodide.loadPackage(["numcodecs"]).catch(() => null);
+  await maximaReady;
+}
+
 async function routeOp({ id, op, args }) {
+  await maximaCodec(args);
   const payload = JSON.stringify(JSON.stringify({ op: String(op || "flood"), args: args || {} }));
   const code = `
 import json
@@ -1793,6 +1803,7 @@ json.dumps(_out, default=str)
 // the river and the dam under a drawn lake and the terrain window to read; op "run" takes that window's terrain (a
 // Float32Array the page read from the Terrarium tiles) and routes a flood through the lake and on down the river.
 async function reservoirOp({ id, op, args, z }) {
+  await maximaCodec(args);
   pyodide.globals.set("_rv_args", JSON.stringify({ op: String(op || "plan"), args: args || {} }));
   pyodide.globals.set("_rv_z", z || null);
   const code = `

@@ -144,11 +144,21 @@ def test_route_needs_a_size_and_holds_its_bounds(toy):
         routing.route(TOY_IDS["A"], peak_cms=5, duration_h=9999, along=False)
 
 
-def test_the_return_period_flow_comes_from_the_simulated_record(toy, monkeypatch):
-    monkeypatch.setattr(rivers, "reach_record", lambda rid, return_periods=None: {
-        "ffa": {"n_years": 86, "fits": {"gev_lmoments": {"q_by_T": {"10": 1234.0}}}}})
+def test_the_return_period_flow_is_flood_its_design_flow(toy, monkeypatch):
+    """Route it's T-year flow is floodsim.design_flow: Log-Pearson III on GEOGLOWS's annual maxima, as Flood it."""
+    from aquascope import floodsim
+
+    years = list(range(1940, 2025))
+    am = np.exp(np.random.default_rng(5).normal(np.log(400), 0.4, len(years)))
+    monkeypatch.setattr(floodsim, "annual_maxima", lambda rids, fetch=None: (years, {int(r): am for r in rids}))
     res = routing.route(TOY_IDS["A"], return_period=10, along=False)
-    assert res["inflow"]["peak_cms"] == 1234.0 and "10-year flow" in res["inflow"]["source"]
+    want = floodsim.flow_for(floodsim.flow_curve(years, am), 10)
+    assert res["inflow"]["peak_cms"] == pytest.approx(want, abs=0.01)
+    d = res["inflow"]["design"]
+    assert d["method"] == "Log-Pearson III" and d["n_years"] == 85 and d["words"] in res["inflow"]["source"]
+    assert "10-year flow" in res["inflow"]["source"] and "flows" in res["licence"]
+    with pytest.raises(ValueError):
+        routing.route(TOY_IDS["A"], return_period=1000, along=False)
 
 
 def test_places_on_the_path_get_the_wave_where_they_stand(toy):

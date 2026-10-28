@@ -5314,7 +5314,8 @@ def main() -> None:
     p_rf.add_argument("river", nargs="?", type=int, default=None, help="A GEOGLOWS v2 river_id")
     p_rf.add_argument("--at", nargs=2, type=float, metavar=("LAT", "LON"), help="Snap this point first")
     p_rf.add_argument("--peak", type=float, default=None, help="The peak flow entering, m3/s")
-    p_rf.add_argument("--rp", type=float, default=None, help="Or the reach's T-year flow (GEOGLOWS simulated record)")
+    p_rf.add_argument("--rp", type=float, default=None, help="Or the reach's T-year flow, 2 to 500 years "
+                      "(Log-Pearson III on GEOGLOWS's annual maxima, as Flood it)")
     p_rf.add_argument("--duration", type=float, default=24.0, help="Hours the water enters for (24)")
     p_rf.add_argument("--shape", choices=["triangle", "block"], default="triangle",
                       help="triangle (peaks at a third of the duration) or block (a release)")
@@ -5380,7 +5381,8 @@ def main() -> None:
     p_rr.add_argument("--width", type=float, default=30.0, help="The spillway's width, m (30)")
     p_rr.add_argument("--coefficient", type=float, default=None,
                       help="The weir coefficient, SI (a broad-crested weir, about 1.705)")
-    p_rr.add_argument("--rp", type=float, default=None, help="The T-year flow entering (GEOGLOWS simulated record)")
+    p_rr.add_argument("--rp", type=float, default=None, help="The T-year flow entering, 2 to 500 years "
+                      "(Log-Pearson III on GEOGLOWS's annual maxima, as Flood it)")
     p_rr.add_argument("--peak", type=float, default=None, help="Or a peak flow entering, m3/s")
     p_rr.add_argument("--duration", type=float, default=24.0, help="Hours the flood enters over (24)")
     p_rr.add_argument("--from", dest="from_river", type=int, default=None,

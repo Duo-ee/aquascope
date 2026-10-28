@@ -284,17 +284,14 @@ def _retro(rid: int, a: date, b: date) -> list[tuple[str, float]]:
 
 
 def _curve(rid: int) -> dict[str, Any] | None:
-    """The reach's flood flows (Log-Pearson III on GEOGLOWS's annual maxima, as Flood it and the reach card)."""
+    """The reach's flood flows: :func:`aquascope.floodsim.reach_curve`, the curve every tool's design flow reads."""
     from aquascope import floodsim
 
     try:
-        years, am = floodsim.annual_maxima([rid], fetch=FETCH["bytes"])
+        c = floodsim.reach_curve(rid, fetch=FETCH["bytes"])
     except Exception as exc:  # noqa: BLE001 - the story stands without the return period
         logger.info("annual maxima for %s unavailable: %s", rid, exc)
         return None
-    if rid not in am:
-        return None
-    c = floodsim.flow_curve(years, am[rid])
     return None if c.get("error") else c
 
 
@@ -687,9 +684,13 @@ def forecasts(river_id: int, peak_date: Any, *, leads: tuple[int, ...] = LEADS,
     reach's 2-year flow. From the forecast archive (00 UTC runs from :data:`FORECAST_FIRST`)."""
     import numpy as np
 
+    from aquascope import floodsim
+
     p = _date(peak_date)
     rid = int(river_id)
     out: list[dict[str, Any]] = []
+    named = bool(curve) and all(k in curve for k in ("method", "first_year", "last_year"))  # type: ignore[operator]
+    two_year = f" The 2-year flow: {floodsim.flow_words(curve)}." if named else ""  # type: ignore[arg-type]
     for lead in leads:
         issued = p - timedelta(days=int(lead))
         row: dict[str, Any] = {"lead_days": int(lead), "issued": issued.isoformat()}
@@ -738,7 +739,7 @@ def forecasts(river_id: int, peak_date: Any, *, leads: tuple[int, ...] = LEADS,
         "coverage": (f"daily 00 UTC runs from {_day(FORECAST_FIRST)}, 15 days ahead, 51 members and a "
                      "high-resolution run"),
         "method": ("Each member's daily mean flow (UTC days) at the reach on the peak day; median, lowest and highest "
-                   "of the 51 members. The 2-year flow is Log-Pearson III on GEOGLOWS's annual maxima (as Flood it)."),
+                   "of the 51 members." + two_year),
     }
     if not ok:
         reasons = "; ".join(f"{r['lead_days']} d: {r.get('note')}" for r in out)

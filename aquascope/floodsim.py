@@ -55,11 +55,14 @@ import numpy as np
 __all__ = [
     "ALPHA", "CAP_HOURS", "G", "H_DRY", "N_CHANNEL", "N_FLOODPLAIN", "RETURN_PERIODS", "STEADY_TOL", "THETA",
     "TERRARIUM", "WEIR_C", "annual_maxima", "apply_breach", "apply_levee", "burn_channel", "compare_exposure",
-    "compare_runs", "edit_grid", "edits_from", "levee_profile", "read_line", "supercover_cells", "weir_flow",
+    "compare_runs", "design_flow", "edit_grid", "edits_from", "levee_profile", "read_line", "supercover_cells",
+    "weir_flow",
     "cell_velocity", "channel_depth", "compare_depths", "corridor",
-    "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "forecast_series", "frame_times",
+    "decode_png_rgb", "edge_codes", "flood_reach", "flow_curve", "flow_for", "flow_words", "forecast_series",
+    "frame_times",
     "depth_over_terrain", "jrc_on_grid", "routed_series", "to_geotiff", "to_ugrid",
-    "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "return_period_for", "ritter", "run_grid",
+    "matched_flow", "pixel_size_m", "plan_window", "prepare_grid", "reach_curve", "return_period_for", "ritter",
+    "run_grid",
     "run_summary", "simulate", "stream_reaches", "terrain_grid", "terrain_window", "terrarium_elevation", "window",
 ]
 
@@ -1034,6 +1037,45 @@ def return_period_for(curve: dict[str, Any], q: float) -> float | None:
     f = 0.0 if hi <= lo else (q - lo) / (hi - lo)
     lt = math.log(curve["T"][k]) + f * (math.log(curve["T"][k + 1]) - math.log(curve["T"][k]))
     return float(math.exp(lt))
+
+
+def flow_words(curve: dict[str, Any]) -> str:
+    """How every tool names a curve's method and source, the same words in Flood it, Route it, the reservoir and
+    Replay (the Explorer's ``design-flow-core.js`` writes the same from the same fields)."""
+    return (f"{curve['method']} on GEOGLOWS v2's annual maxima of simulated daily flow, "
+            f"{curve['first_year']} to {curve['last_year']}")
+
+
+def reach_curve(river_id: int, *, fetch: Callable[[str], bytes | None] | None = None) -> dict[str, Any]:
+    """One reach's T-year flow curve: :func:`flow_curve` on its :func:`annual_maxima`; ``{"error": ...}`` when the
+    store has no record for it or the fit cannot be made."""
+    rid = int(river_id)
+    years, am = annual_maxima([rid], fetch=fetch)
+    if rid not in am:
+        return {"error": f"reach {rid} is not in GEOGLOWS's annual maxima store"}
+    return flow_curve(years, am[rid])
+
+
+def design_flow(river_id: int, return_period: float, *,
+                fetch: Callable[[str], bytes | None] | None = None) -> dict[str, Any]:
+    """A reach's ``return_period``-year flow, the one design flow every tool uses (Flood it, Route it, Draw a
+    reservoir, Replay): Log-Pearson III on GEOGLOWS v2's annual maxima (:func:`reach_curve`), read on the curve
+    with :func:`flow_for`. ``return_period`` is 2 to 500 years, the range the curve is fitted over.
+
+    Returns ``flow_cms``, ``return_period``, the curve's ``method``, ``n_years``, ``first_year`` and
+    ``last_year``, ``words`` (:func:`flow_words`), the store (``source``) and its ``licence``. Raises
+    ``ValueError`` for a return period outside the range and ``RuntimeError`` when the reach has no curve."""
+    t = float(return_period)
+    lo, hi = FIT_RETURN_PERIODS[0], FIT_RETURN_PERIODS[-1]
+    if not (lo <= t <= hi):
+        raise ValueError(f"return_period must be between {lo} and {hi} years (the range the flows are fitted over)")
+    curve = reach_curve(river_id, fetch=fetch)
+    if curve.get("error"):
+        raise RuntimeError(f"no flood frequency curve for reach {int(river_id)}: {curve['error']}")
+    q = flow_for(curve, t)
+    return {"river_id": int(river_id), "return_period": t, "flow_cms": round(q, 3), "method": curve["method"],
+            "n_years": curve["n_years"], "first_year": curve["first_year"], "last_year": curve["last_year"],
+            "words": flow_words(curve), "source": MAXIMA_ZARR, "licence": MAXIMA_LICENCE}
 
 
 def matched_flow(click: dict[str, Any], q: float, other: dict[str, Any]) -> float:

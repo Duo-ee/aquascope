@@ -40,6 +40,7 @@ import {
 } from "./floodsim-sketch-core.js?v=__BUILD__";
 import { cancelDraw, drawSketches, onSketchClick, onSketchMove, startLineDraw } from "./floodsim-sketch.js?v=__BUILD__";
 import { sourceLines } from "./flood-views-core.js?v=__BUILD__";
+import { designFlowWords, flowFor } from "./design-flow-core.js?v=__BUILD__";
 
 const SRC = "floodsim-depth";
 const ROW = "floodit";
@@ -102,15 +103,6 @@ async function floodsim(op, args, z) {
 }
 
 const curveOf = (p) => (p && p.reaches && p.reaches[String(p.river_id)] && p.reaches[String(p.river_id)].curve) || null;
-
-function flowFor(curve, T) {
-  if (!curve || !curve.q) return null;
-  const lt = curve.T.map(Math.log), x = Math.log(Math.min(Math.max(T, curve.T[0]), curve.T.at(-1)));
-  for (let k = 0; k < lt.length - 1; k++) {
-    if (x <= lt[k + 1]) return curve.q[k] + ((curve.q[k + 1] - curve.q[k]) * (x - lt[k])) / (lt[k + 1] - lt[k]);
-  }
-  return curve.q.at(-1);
-}
 
 /** The worker's choice from the picker's: { return_period } | { flow_cms } | { series, label }. */
 async function resolveChoice(choice) {
@@ -550,7 +542,7 @@ function chip(T, cur, curve) {
   const v = flowFor(curve, T);
   const on = cur && Number(cur.return_period) === T;
   return `<button type="button" class="fi-chip${on ? " on" : ""}" data-rp="${T}" aria-pressed="${on}" ` +
-    `title="${escapeHtml(v ? `${q(v)} at this reach, ${curve.method} on GEOGLOWS's annual maxima ${curve.first_year} to ${curve.last_year}` : "")}">` +
+    `title="${escapeHtml(v ? `${q(v)} at this reach, ${designFlowWords(curve)}` : "")}">` +
     `${T}<small>-yr</small>${v ? `<em>${fmt(v, 0)}</em>` : ""}</button>`;
 }
 
@@ -566,7 +558,7 @@ function render() {
   const about = run && run.g.click.return_period && !run.choice.return_period ? `, about the ${fmt(run.g.click.return_period, 0)}-year flow` : "";
   const flowLine = run ? `<p class="fi-flow"><b>${escapeHtml(cap(run.words))}</b>${about} ` +
     `at this reach (${q(run.g.click.flow_cms)}). Every river in view at the same return period: ${run.g.sources.length} inflows.</p>` :
-    (curve ? `<p class="fi-flow muted">Flows: ${escapeHtml(curve.method)} on GEOGLOWS's annual maxima, ${curve.first_year} to ${curve.last_year}.</p>` : "");
+    (curve ? `<p class="fi-flow muted">Flows: ${escapeHtml(designFlowWords(curve))}.</p>` : "");
   const st = status ? `<p class="wi-status${status.kind === "error" ? " error" : ""}" role="status">${status.kind === "busy" || /…$/.test(status.text) ? '<span class="spinner" aria-hidden="true"></span>' : ""}${escapeHtml(status.text)}</p>` : "";
   let result = "";
   if (run && !status) {

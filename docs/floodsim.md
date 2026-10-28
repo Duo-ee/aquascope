@@ -79,6 +79,11 @@ These are the same values as the yearly maxima of the API's daily record that th
 reach 230567275: all 85 years agree; the 100-year flow is 343 m³/s from the store's 85 years and 341 m³/s from the API's
 86). The store's own licence is CC BY-NC-SA 4.0.
 
+**One design flow.** `aquascope.floodsim.design_flow(river_id, T)` is this curve read at T (2 to 500 years), and every
+tool that asks for a T-year flow uses it: Flood it, Route it, Draw a reservoir and Replay. The same reach and the same
+T give the same m³/s in each, and each card names it the same way ("Log-Pearson III on GEOGLOWS v2's annual maxima of
+simulated daily flow, 1940 to 2024"; `flow_words`, and `design-flow-core.js` in the Explorer).
+
 **The same return period.** The flow chosen at the clicked reach is carried to every inflow at the same return period:
 its return period on the clicked reach's curve, read in log(T) between the fitted points, gives each inflow's flow on
 its own curve. Below the 2-year flow, and above the 500-year, each inflow gets the same share of its own 2-year (or

@@ -156,8 +156,11 @@ These start at 10 m, 15 m and 30 m: illustrative, for you to set.
 
 And the flood:
 
-- **the T-year flow here**: the dam's reach's 2-, 10-, 25- or 100-year flow (GEV on its GEOGLOWS
-  simulated record), a triangle over 24 hours, entering at the dam;
+- **the T-year flow here**: the dam's reach's 2-, 10-, 25- or 100-year flow, a triangle over 24
+  hours, entering at the dam. It is the same design flow as Flood it's and Route it's
+  (`aquascope.floodsim.design_flow`): Log-Pearson III on GEOGLOWS v2's annual maxima of simulated
+  daily flow since 1940 (`retrospective/maximums.zarr`, CC BY-NC-SA 4.0), so the same reach and
+  the same T give the same m³/s in every tool;
 - **a number** in m³/s;
 - **the wave on the map**: a Route it flood from a reach upstream, or a drawn storm
   ([Draw a storm](#draw-a-storm)), routed down to the dam.
@@ -234,6 +237,14 @@ depth for a flat floor, and the V-shaped valley's width at each level.
 reads the terrain tiles itself and prints the reservoir's numbers and the peak furthest down with
 and without it (`--peak`, `--from RIVER_ID`, `--storm RING --rain MM`, `--json`); `--check`
 prints the NEH table. The MCP tool `route_reservoir` returns the same as JSON.
+
+On the Severn above Newtown (run on 2026-10-28) it writes: a reservoir of 11.318 km² on reach
+230458457; the 100-year flow of the reach, 65 m³/s (Log-Pearson III on GEOGLOWS v2's annual maxima
+of simulated daily flow, 1940 to 2024), over 24 h peaks at 65 m³/s at the dam after 8 h and leaves
+at 25 m³/s after 18 h, 61.1 % lower and 10 h later; the water rises to 10.5 m above the lowest
+ground, with 1,730,000 m³ held at most; furthest down (reach 230461752) the peak is 20 m³/s with the
+reservoir and 38 m³/s without. Flood it reads the same 65 m³/s (64.6) as the 100-year flow of that
+reach.
 
 GEOGLOWS v2 routing configuration and retrospective, CC BY 4.0; river network TDX-Hydro (NGA), CC BY-SA 4.0,
 shown and not republished. Terrain: Terrarium tiles (Mapzen/Tilezen joerd on AWS Open Data: SRTM, GMTED2010,

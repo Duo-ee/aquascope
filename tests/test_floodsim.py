@@ -489,3 +489,32 @@ def test_ask_the_map_flood_reach_is_read_checked_and_said():
         "Flood the selected river at the 10-year flow"
     assert "flood_reach" in mc.model_prompt("flood it")["system"] if isinstance(mc.model_prompt("flood it"), dict) \
         else "flood_reach" in str(mc.model_prompt("flood it"))
+
+
+def test_design_flow_twin_fixture():
+    """explorer/tests/design-flow-core.test.mjs reads the same curve and flows: the JS reads a flow off the curve
+    and words the method exactly as floodsim.flow_for and flow_words do."""
+    import json
+    from pathlib import Path
+
+    fx = json.loads((Path(__file__).parent / "fixtures" / "design_flow_twin.json").read_text(encoding="utf-8"))
+    years = list(range(1940, 2025))
+    am = np.exp(np.random.default_rng(7).normal(np.log(300), 0.4, len(years)))
+    c = fs.flow_curve(years, am)
+    assert c == fx["curve"]
+    assert [round(fs.flow_for(c, t), 6) for t in fx["T"]] == fx["q"]
+    assert fs.flow_words(c) == fx["words"]
+
+
+def test_design_flow_reads_the_reach_curve(monkeypatch):
+    years = list(range(1940, 2025))
+    am = np.exp(np.random.default_rng(7).normal(np.log(300), 0.4, len(years)))
+    monkeypatch.setattr(fs, "annual_maxima", lambda rids, fetch=None: (years, {int(r): am for r in rids if r == 7}))
+    d = fs.design_flow(7, 100)
+    assert d["flow_cms"] == pytest.approx(fs.flow_for(fs.flow_curve(years, am), 100), abs=1e-3)
+    assert d["method"] == "Log-Pearson III" and d["words"] == fs.flow_words(fs.flow_curve(years, am))
+    assert d["licence"] == fs.MAXIMA_LICENCE and d["source"] == fs.MAXIMA_ZARR
+    with pytest.raises(ValueError):
+        fs.design_flow(7, 1.5)
+    with pytest.raises(RuntimeError):
+        fs.design_flow(8, 100)
