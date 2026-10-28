@@ -248,3 +248,31 @@ def test_a_gauge_far_down_another_river_is_not_the_event_s(toy, monkeypatch):  #
     stem = replay._stem(TOY_IDS["B"])
     assert stem[TOY_IDS["B"]] == 0 and stem[TOY_IDS["C"]] == 1
     assert all(v != 0 for k, v in stem.items() if k != TOY_IDS["B"])
+
+
+def test_a_flood_near_a_tributary_is_the_main_river_s(monkeypatch):
+    """A news event's centre beside a tributary (the Leadon beside the Severn): the reach picked is the main
+    river's, the largest upstream area within 25 km, at its reach nearest the centre, not the nearer tributary."""
+    from aquascope import rivers
+
+    ids = {"M0": 230900001, "M1": 230900002, "M2": 230900003, "M3": 230900004, "T0": 230900005, "T1": 230900006}
+    ds = {"M0": "M1", "M1": "M2", "M2": "M3", "M3": None, "T0": "T1", "T1": "M2"}
+    where = {"M0": (-2.30, 52.20), "M1": (-2.25, 52.10), "M2": (-2.25, 52.00), "M3": (-2.25, 51.80),
+             "T0": (-2.45, 52.08), "T1": (-2.40, 52.05)}
+    area = {"M0": 1e9, "M1": 1e9, "M2": 1e9, "M3": 1e9, "T0": 5e7, "T1": 5e7}
+    names = list(ids)
+    net = rivers._Network(230, [ids[n] for n in names], [ids[ds[n]] if ds[n] else -1 for n in names],
+                          [area[n] for n in names], [where[n][0] for n in names], [where[n][1] for n in names])
+    monkeypatch.setattr(rivers, "_network_for", lambda rid, lat=None, lon=None: net)
+    # The tiles see the tributary near the centre, with a higher order than anything else within 12 km.
+    near = [{"river_id": ids["T0"], "strahler_order": 3, "distance_m": 700.0, "lat": 52.08, "lon": -2.445}]
+    monkeypatch.setattr(rivers, "reaches_near", lambda lat, lon, max_distance_m=2000.0, limit=6: near)
+    got = replay._reach_for(None, 52.08, -2.44)
+    assert got["river_id"] == ids["M1"] and "largest upstream area" in got["how"]
+    # When the main river's line is within reach of the tiles, its nearest line wins.
+    near2 = near + [{"river_id": ids["M2"], "strahler_order": 5, "distance_m": 9000.0, "lat": 52.0, "lon": -2.3}]
+    monkeypatch.setattr(rivers, "reaches_near", lambda lat, lon, max_distance_m=2000.0, limit=6: near2)
+    assert replay._reach_for(None, 52.08, -2.44)["river_id"] == ids["M2"]
+    # Without the network the Strahler pick stands.
+    monkeypatch.setattr(rivers, "_network_for", lambda rid, lat=None, lon=None: (_ for _ in ()).throw(OSError("x")))
+    assert replay._reach_for(None, 52.08, -2.44)["river_id"] == ids["M2"]

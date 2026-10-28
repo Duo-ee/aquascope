@@ -59,21 +59,29 @@ export function exposureFill(res) {
   return { buildings: n0(after("buildings")), roads_km: n1(after("roads_km") || 0), people: n0(after("people") || 0) };
 }
 
-/** The share link's value: the reach and the window, or the place and the month Floods past is asked about. */
+/**
+ * The share link's value: the reach and the window, or the place and the month Floods past is asked about, and for a
+ * Floods past event its number of news reports, so the link replays the same story (the event's first note says it).
+ */
 export function encodeReplay(ev) {
   if (!ev) return "";
   const parts = [ev.river_id ?? "", ev.start || "", ev.end || ""];
-  if (Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lon))) parts.push(Number(ev.lat).toFixed(4), Number(ev.lon).toFixed(4));
+  if (Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lon))) {
+    parts.push(Number(ev.lat).toFixed(4), Number(ev.lon).toFixed(4));
+    if (ev.reports !== null && ev.reports !== undefined && Number.isInteger(Number(ev.reports)) && Number(ev.reports) > 0) {
+      parts.push(String(Number(ev.reports)));
+    }
+  }
   return parts.join(",");
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-/** `rp=river_id,start,end[,lat,lon]` from a hash, or null. */
+/** `rp=river_id,start,end[,lat,lon[,reports]]` from a hash, or null. With reports it is a Floods past event again. */
 export function decodeReplay(hash) {
   const q = new URLSearchParams(String(hash || "").replace(/^#/, ""));
   if (!q.has("rp")) return null;
-  const [rid, start, end, lat, lon] = String(q.get("rp")).split(",");
+  const [rid, start, end, lat, lon, reports] = String(q.get("rp")).split(",");
   if (!ISO.test(start || "") || (end && !ISO.test(end))) return null;
   const out = { river_id: /^\d{9}$/.test(rid || "") ? Number(rid) : null, start, end: end || start };
   if (lat !== undefined && lon !== undefined && Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
@@ -81,6 +89,10 @@ export function decodeReplay(hash) {
     out.lon = Number(lon);
   }
   if (out.river_id === null && out.lat === undefined) return null;
+  if (out.lat !== undefined && /^\d+$/.test(reports || "") && Number(reports) > 0) {
+    out.reports = Number(reports);
+    out.event = { start: out.start, end: out.end, lat: out.lat, lon: out.lon, reports: out.reports };
+  }
   return out;
 }
 

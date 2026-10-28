@@ -77,6 +77,8 @@ MAX_GAUGES = 3
 WAVE_NOTE_KM = 150.0
 #: How far from a news event's centre its river is looked for.
 EVENT_RADIUS_M = 12000.0
+#: The main river of an event: the river with the largest upstream area within this distance of its centre (#664).
+MAIN_RIVER_RADIUS_M = 25000.0
 #: The upstream basin goes to ClimateSERV as cells of this size (degrees), coarser when it would be too many.
 RAIN_CELL_DEG = (0.1, 0.25, 0.5, 1.0)
 MAX_RAIN_PARTS = 120
@@ -206,9 +208,80 @@ def event_window(start: Any, end: Any = None, *, pre: int = PRE_DAYS, post: int 
 # ── the reach ───────────────────────────────────────────────────────────────
 
 
+def _accumulated(net: Any, i0: int) -> dict[int, float]:
+    """The upstream area (m2) of every reach above reach index ``i0``, ``i0`` included, by index."""
+    import numpy as np
+
+    from aquascope import rivers
+
+    order, parent, starts = rivers._upstream_tree(net, i0, cap=400_000)
+    acc = net.area_m2[order].astype(float)
+    acc[~np.isfinite(acc)] = 0.0
+    bounds = [*starts, len(order)]
+    for k in range(len(starts) - 1, 0, -1):
+        sl = slice(bounds[k], bounds[k + 1])
+        np.add.at(acc, parent[sl], acc[sl])
+    return {int(order[j]): float(acc[j]) for j in range(len(order))}
+
+
+def main_river(lat: float, lon: float, seed_river_id: int, *, radius_m: float = MAIN_RIVER_RADIUS_M,
+               near: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """The main river near a point: of the reaches whose catchment centre is within ``radius_m``, the river with the
+    largest upstream area (where it leaves the circle), and on its main stem (the bigger branch at each confluence)
+    the reach nearest the point: by its line when it is among ``near`` (:func:`aquascope.rivers.reaches_near`'s
+    answer, distances to the drawn lines), else by its catchment centre. ``seed_river_id`` is any reach near the
+    point (it picks the network read). So a flood reported between a tributary and the main river is the main
+    river's, not the nearer tributary's. Returns ``{"river_id", "lat", "lon", "distance_m", "upstream_area_km2"}``,
+    or None when nothing is near."""
+    import numpy as np
+
+    from aquascope import rivers
+
+    net = rivers._network_for(int(seed_river_id), lat, lon)
+    kx = 111.32 * max(0.05, math.cos(math.radians(lat)))
+    d_km = np.hypot((net.lon - lon) * kx, (net.lat - lat) * 110.574)
+    inside = d_km <= radius_m / 1000.0
+    idx = np.nonzero(inside)[0]
+    if not idx.size:
+        return None
+    # The largest upstream area in the circle is where a river leaves it: a reach whose next one is outside.
+    exits = []
+    for i in idx:
+        j = net.index(int(net.ds[i]))
+        if j is None or not inside[j]:
+            exits.append(int(i))
+    best, best_area, areas = None, -1.0, {}
+    for i in exits:
+        acc = _accumulated(net, i)
+        if acc[i] > best_area:
+            best, best_area, areas = i, acc[i], acc
+    if best is None:
+        return None
+    nearest, i, stem = best, best, [best]
+    while True:
+        kids = [k for k in net.children(i) if inside[k]]
+        if not kids:
+            break
+        i = max(kids, key=lambda k: areas.get(int(k), 0.0))
+        stem.append(i)
+        if d_km[i] < d_km[nearest]:
+            nearest = i
+    on_stem = {int(net.ids[k]): k for k in stem}
+    lines = sorted((r for r in near or [] if int(r["river_id"]) in on_stem), key=lambda r: float(r["distance_m"]))
+    if lines:
+        r = lines[0]
+        k = on_stem[int(r["river_id"])]
+        return {"river_id": int(r["river_id"]), "lat": r["lat"], "lon": r["lon"], "distance_m": float(r["distance_m"]),
+                "upstream_area_km2": round(areas.get(int(k), 0.0) / 1e6, 1)}
+    return {"river_id": int(net.ids[nearest]), "lat": _num(net.lat[nearest], 5), "lon": _num(net.lon[nearest], 5),
+            "distance_m": round(float(d_km[nearest]) * 1000.0, 1),
+            "upstream_area_km2": round(areas.get(int(nearest), 0.0) / 1e6, 1)}
+
+
 def _reach_for(river_id: Any, lat: float | None, lon: float | None) -> dict[str, Any]:
-    """The event's reach: ``river_id`` as given, or the main channel (highest Strahler order, the nearer on a tie)
-    within :data:`EVENT_RADIUS_M` of the point."""
+    """The event's reach: ``river_id`` as given, or the main river near the point (:func:`main_river`: the largest
+    upstream area within :data:`MAIN_RIVER_RADIUS_M`, its reach nearest the point); the main channel (highest
+    Strahler order, the nearer on a tie) within :data:`EVENT_RADIUS_M` when the network cannot be read."""
     from aquascope import rivers
 
     if river_id is not None:
@@ -223,6 +296,16 @@ def _reach_for(river_id: Any, lat: float | None, lon: float | None) -> dict[str,
     main = rivers.main_channel(near)
     if main is None:
         raise LookupError(f"no river within {EVENT_RADIUS_M / 1000:g} km of {lat:.3f}, {lon:.3f}")
+    try:
+        big = main_river(float(lat), float(lon), int(main["river_id"]), near=near)
+    except Exception as exc:  # noqa: BLE001 - the Strahler pick stands when the network cannot be read
+        logger.info("main river near %s, %s unavailable: %s", lat, lon, exc)
+        big = None
+    if big is not None:
+        return {"river_id": big["river_id"], "lat": big["lat"], "lon": big["lon"],
+                "how": (f"the river with the largest upstream area within {MAIN_RIVER_RADIUS_M / 1000:g} km of the "
+                        f"event ({big['upstream_area_km2']:,.0f} km² there), at its reach nearest the event's "
+                        f"centre, {big['distance_m'] / 1000:.1f} km away")}
     return {"river_id": int(main["river_id"]), "lat": main["lat"], "lon": main["lon"],
             "how": (f"the largest river (Strahler order {main['strahler_order']}) within "
                     f"{EVENT_RADIUS_M / 1000:g} km of the event, {main['distance_m'] / 1000:.1f} km from its centre")}
