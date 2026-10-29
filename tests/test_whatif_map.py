@@ -310,6 +310,25 @@ def test_number_tokens_carry_the_unit_the_words_give():
         ("a fifth", 0.2, "fraction"), ("300", 300.0, "l/s"), ("twenty-five", 25.0, "percent"), ("2", 2.0, "degC")]
 
 
+@pytest.mark.parametrize("line, token, unit, value", [
+    ("take half a cubic metre per second", "half", "m3/s", 0.5),
+    ("take a quarter of a litre per second", "a quarter", "l/s", 0.00025),
+    ("take half a megalitre per day", "half", "ML/day", 500 / 86400),
+])
+def test_fractional_quantities_keep_their_explicit_units(line, token, unit, value):
+    result = wm.parse_scenario_reply(_reply(("take_water", token, unit)), line)
+    assert not result["errors"], result
+    assert result["scenario"]["demand_cms"] == pytest.approx(value, abs=1e-6)
+
+
+def test_fractional_quantity_does_not_weaken_unit_checks_or_shares():
+    line = "take half a cubic metre per second"
+    bad = wm.parse_scenario_reply(_reply(("take_water", "half", "l/s")), line)
+    assert bad["scenario"] is None and "words say m3/s, not l/s" in bad["errors"][0]
+    share = wm.parse_scenario_reply(_reply(("less_rain", "a quarter", "fraction")), "a quarter less rain")
+    assert not share["errors"] and share["scenario"]["dp_pct"] == -25
+
+
 @pytest.mark.parametrize("line, key, value", [
     ("take 300 litres per second", "demand_cms", 0.3),
     ("take 300 liters a second", "demand_cms", 0.3),

@@ -378,14 +378,17 @@ def number_tokens(text: str) -> list[dict[str, Any]]:
             continue
         value, share = got
         unit = "fraction" if share else None
-        if not share:
-            rest = low[m.end():m.end() + 40]
-            rest = re.sub(r"^\s*(?:more|less|fewer|of|extra|higher|lower|warmer|cooler)?\s*", "", rest) \
-                if not re.match(r"\s*(?:%|°)", rest) else rest
-            for name, pattern in _UNIT_AFTER:
-                if re.match(r"\s*(?:" + pattern + ")", rest):
-                    unit = name
-                    break
+        rest = low[m.end():m.end() + 40]
+        rest = re.sub(r"^\s*(?:more|less|fewer|of|extra|higher|lower|warmer|cooler)?\s*", "", rest) \
+            if not re.match(r"\s*(?:%|°)", rest) else rest
+        # "half a litre" is a quantity, while "half the rain" is a share.
+        # Strip an article only when testing for an explicitly named unit.
+        if share:
+            rest = re.sub(r"^(?:a|an)\s+", "", rest)
+        for name, pattern in _UNIT_AFTER:
+            if re.match(r"\s*(?:" + pattern + ")", rest):
+                unit, share = name, False
+                break
         out.append({"token": token, "value": value, "share": share, "unit": unit})
     return out
 

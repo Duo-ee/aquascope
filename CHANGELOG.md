@@ -8,6 +8,7 @@ All notable changes to AquaScope are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **What-if fractional quantities** (#646): a model reading of “half a cubic metre per second” keeps the stated flow unit instead of treating the quantity as a proportion.
 - **Cite 1.1.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.1.0's Zenodo DOI (10.5281/zenodo.23718093).
 
 ## [1.1.0] - 2026-10-28
