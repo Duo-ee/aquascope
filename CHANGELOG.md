@@ -8,6 +8,7 @@ All notable changes to AquaScope are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **GR4J at large gauges** (#273): the station model asks before using point forcing above 10,000 km², and describes the forcing download separately from the fit.
 - **Cite 1.1.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.1.0's Zenodo DOI (10.5281/zenodo.23718093).
 
 ## [1.1.0] - 2026-10-28

@@ -25,6 +25,7 @@ import { base64ToBytes, exportOptions, exportSummary } from "./export-menu.js?v=
 import { annualMaxPoints } from "./timeline.js?v=__BUILD__";
 import { resetEvidence, showSkillBadge, startEvidence } from "./evidence.js?v=__BUILD__";
 import { loadPlaceContext, resetPlaceContext } from "./context.js?v=__BUILD__";
+import { confirmLargeArea } from "./gr4j-area.js?v=__BUILD__";
 
 let analysisRun = 0;
 let gr4jRun = 0;
@@ -484,6 +485,7 @@ function resetGr4j() {
   if (btn) { btn.disabled = false; btn.textContent = "Calibrate GR4J"; }
   const stop = $("btn-gr4j-stop");
   if (stop) stop.hidden = true;
+  $("gr4j-area-warning").hidden = true;
 }
 
 async function runGr4j() {
@@ -508,6 +510,12 @@ async function runGr4j() {
       done();
       return;
     }
+    const gate = confirmLargeArea(area.area, $("gr4j-area-warning"), $("gr4j-area-message"), $("btn-gr4j-continue"));
+    gr4jCancel = () => { cancelled = true; gate.cancel(); };
+    const confirmed = await gate.result;
+    if (my !== gr4jRun) return;
+    if (!confirmed || cancelled) { say("Calibration stopped."); done(); return; }
+    gr4jCancel = () => { cancelled = true; };
     const t = res.series.t, v = res.series.v;
     let start = t[0];
     const end = t[t.length - 1];
