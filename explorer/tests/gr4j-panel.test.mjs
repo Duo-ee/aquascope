@@ -35,6 +35,7 @@ test("large basin does not fetch forcing until the user clicks Run anyway", asyn
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.requests(), 0);
   assert.equal(h.elements["gr4j-area-warning"].hidden, false);
+  assert.equal(h.elements["gr4j-status"].textContent, "Review the catchment area before continuing.");
   h.elements["btn-gr4j-continue"].onclick();
   await pending;
   assert.equal(h.requests(), 1);

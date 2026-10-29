@@ -25,7 +25,7 @@ import { base64ToBytes, exportOptions, exportSummary } from "./export-menu.js?v=
 import { annualMaxPoints } from "./timeline.js?v=__BUILD__";
 import { resetEvidence, showSkillBadge, startEvidence } from "./evidence.js?v=__BUILD__";
 import { loadPlaceContext, resetPlaceContext } from "./context.js?v=__BUILD__";
-import { confirmLargeArea } from "./gr4j-area.js?v=__BUILD__";
+import { AREA_WARN_KM2, confirmLargeArea } from "./gr4j-area.js?v=__BUILD__";
 
 let analysisRun = 0;
 let gr4jRun = 0;
@@ -511,6 +511,7 @@ async function runGr4j() {
       done();
       return;
     }
+    if (area.area > AREA_WARN_KM2) say("Review the catchment area before continuing.", "warn");
     const gate = confirmLargeArea(area.area, $("gr4j-area-warning"), $("gr4j-area-message"), $("btn-gr4j-continue"));
     gr4jCancel = () => { cancelled = true; gate.cancel(); };
     const confirmed = await gate.result;
