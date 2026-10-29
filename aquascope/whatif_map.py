@@ -223,7 +223,8 @@ def _clause(raw: str) -> tuple[str | None, float | None, str]:
     for words, v in _FRACTIONS.items():
         if re.search(rf"\b{words}\b", raw):
             value = v
-            token = next((t for t in number_tokens(raw) if t["token"] == words), None)
+            # "a half" names the same fraction as "half", but the token keeps the article.
+            token = next((t for t in number_tokens(raw) if t["token"] in (words, f"a {words}")), None)
             if token and not token["share"] and token["unit"] in UNITS:
                 dimension, factor = UNITS[token["unit"]]
                 if dimension == _UNIT_OF_KEY[kind]:

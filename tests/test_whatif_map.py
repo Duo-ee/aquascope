@@ -314,6 +314,8 @@ def test_number_tokens_carry_the_unit_the_words_give():
     ("take half a cubic metre per second", "half", "m3/s", 0.5),
     ("take a quarter of a litre per second", "a quarter", "l/s", 0.00025),
     ("take half a megalitre per day", "half", "ML/day", 500 / 86400),
+    ("take a half cubic metre per second", "a half", "m3/s", 0.5),
+    ("take a half litre per second", "a half", "l/s", 0.0005),
 ])
 def test_fractional_quantities_keep_their_explicit_units(line, token, unit, value):
     result = wm.parse_scenario_reply(_reply(("take_water", token, unit)), line)
@@ -335,6 +337,10 @@ def test_fractional_quantity_does_not_weaken_unit_checks_or_shares():
     ("half a degree warmer", "dt_c", 0.5),
     ("half a percent less rain", "dp_pct", -0.5),
     ("a quarter less rain", "dp_pct", -25.0),
+    ("a half cubic metre per second", "demand_cms", 0.5),
+    ("a half litre per second", "demand_cms", 0.0005),
+    ("a half degree warmer", "dt_c", 0.5),
+    ("a half percent less rain", "dp_pct", -0.5),
 ])
 def test_rules_distinguish_fractional_quantities_from_proportions(line, key, value):
     result = wm.parse_scenario(line)
