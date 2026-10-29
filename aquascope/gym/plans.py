@@ -31,9 +31,9 @@ weighted sum of five parts, the weights in :data:`WEIGHTS`:
 
 A part the reference cannot judge (a reference with no method, or no gate)
 is left out and the other weights are renormalised. A plan with no steps
-scores 0 on every part; a plan that declines a solvable case scores 0. On a
-case whose reference declines, the score is 1 when the candidate declines
-and 0 otherwise, and the coverage parts are not computed. The
+scores 0 on every part. A refusal is scored only after an explicit review when
+the reference permits a refusal; a refusal of a plan-only case scores 0.
+Pending reviews have no score and are excluded from reported means. The
 ``validator_errors_first_try`` field counts the errors the Studio's validator
 raised on the model's first plan (0 for the tree, and for a model plan that
 passed at once); it is reported, not scored.
@@ -41,6 +41,7 @@ passed at once); it is reported, not scored.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -91,7 +92,7 @@ WEIGHTS: dict[str, float] = {"tools": 0.30, "methods": 0.25, "gates": 0.20, "cle
 FRAMING_TOOLS = frozenset({"describe_catchment", "find_stations", "assess_site"})
 #: The reference-file keys a case may carry (anything else is an error the validator reports).
 _CASE_KEYS = frozenset({"id", "playbook", "title", "brief", "intake", "site", "expected_branch", "steps", "forbidden",
-                        "decline", "decline_kind", "rationale", "tags"})
+                        "decline", "decline_kind", "rationale", "tags", "accepts"})
 _STEP_KEYS = frozenset({"tool", "method", "gates", "optional", "note", "alternatives"})
 
 
@@ -142,6 +143,8 @@ class Reference:
     decline: bool = False
     #: ``declined`` (a playbook rule), ``no_branch``, ``refused`` (the registry), ``intake``.
     decline_kind: str | None = None
+    #: Alternative acceptable answer shapes. Decline reasons are authored as literal phrases.
+    accepts: list[dict[str, Any]] = field(default_factory=list)
     rationale: str | None = None
     tags: list[str] = field(default_factory=list)
     path: str | None = None
@@ -169,7 +172,7 @@ class Reference:
             "steps": [s.to_dict() for s in self.steps],
             "forbidden": {"tools": list(self.forbidden_tools), "methods": list(self.forbidden_methods)},
             "decline": self.decline, "decline_kind": self.decline_kind, "rationale": self.rationale,
-            "tags": list(self.tags),
+            "tags": list(self.tags), "accepts": self.accepts,
         }
         if with_recon:
             d["recon"] = recon_for(self)
@@ -198,6 +201,7 @@ class Reference:
             steps=steps, forbidden_tools=[str(t) for t in (forbidden.get("tools") or [])],
             forbidden_methods=[str(m) for m in (forbidden.get("methods") or [])],
             decline=bool(d.get("decline")), decline_kind=d.get("decline_kind"),
+            accepts=d.get("accepts", []),
             rationale=" ".join(str(d.get("rationale") or "").split()) or None,
             tags=[str(t) for t in (d.get("tags") or [])], path=path,
         )
@@ -326,6 +330,29 @@ def validate_reference(ref: Reference, plans_dir: str | Path | None = None) -> l
     from aquascope.studio import catalogue
 
     errors: list[str] = []
+    if not isinstance(ref.accepts, list):
+        errors.append("accepts must be a list")
+    else:
+        kinds: list[str] = []
+        for alternative in ref.accepts:
+            if not isinstance(alternative, dict) or alternative.get("kind") not in ("plan", "decline"):
+                errors.append("each accepted answer must have kind plan or decline")
+                continue
+            kind = alternative["kind"]
+            kinds.append(kind)
+            unknown = set(alternative) - {"kind", "reason_must_mention"}
+            if unknown:
+                errors.append(f"unknown accepted answer keys: {sorted(unknown)}")
+            reasons = alternative.get("reason_must_mention")
+            if kind == "decline" and (not isinstance(reasons, list) or not reasons or
+                                      any(not isinstance(r, str) or not r.strip() for r in reasons)):
+                errors.append("an accepted decline needs nonempty reason_must_mention phrases")
+            if kind == "plan" and reasons is not None:
+                errors.append("reason_must_mention applies only to declines")
+        if len(kinds) != len(set(kinds)):
+            errors.append("accepted answer kinds must be unique")
+        if ref.accepts and ((ref.decline and "plan" in kinds) or (not ref.decline and "plan" not in kinds)):
+            errors.append("accepted answers must agree with the reference plan shape")
     if not ref.id:
         errors.append("no id")
     try:
@@ -613,7 +640,13 @@ def _gate_matches(ref_path: str | None, got_path: str | None) -> bool:
     return got_path == ref_path or got_path.startswith(ref_path + ".")
 
 
-def score_plan(reference: Reference | dict[str, Any], candidate: Any) -> dict[str, Any]:
+def decline_rubric_version(ref: Reference) -> str:
+    """Bind reviews to the case's entire scoring reference, including its rationale."""
+    raw = json.dumps(ref.to_dict(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def score_plan(reference: Reference | dict[str, Any], candidate: Any, *, reviews: Any = None) -> dict[str, Any]:
     """Score a candidate plan against a reference; see the module docstring for the formula.
 
     ``reference`` is a :class:`Reference` or its dict; ``candidate`` is
@@ -631,6 +664,16 @@ def score_plan(reference: Reference | dict[str, Any], candidate: Any) -> dict[st
         "explain": [],
     }
     explain: list[str] = out["explain"]
+    if cand.declined and (ref.decline or any(isinstance(a, dict) and a.get("kind") == "decline"
+                                              for a in ref.accepts)):
+        from aquascope.gym.review import lookup_decline_review
+
+        decision = lookup_decline_review(ref.id, cand.reason, decline_rubric_version(ref), reviews)
+        verdict = decision["verdict"]
+        out["decline_correct"] = None if verdict == "pending" else verdict == "valid"
+        out["score"] = None if verdict == "pending" else float(verdict == "valid")
+        explain.append(f"decline review {verdict}: {decision['explanation']}")
+        return out
     if ref.decline:
         out["decline_correct"] = bool(cand.declined)
         if cand.declined:
@@ -725,7 +768,7 @@ class PlanResult:
     provider: str | None
     repeat: int = 0
     tags: list[str] = field(default_factory=list)
-    score: float = 0.0
+    score: float | None = 0.0
     coverage_tools: float | None = None
     coverage_methods: float | None = None
     coverage_gates: float | None = None
@@ -804,7 +847,7 @@ def _result(ref: Reference, agent: str, cfg: _Config, repeat: int, cand: Candida
     res = PlanResult(
         case_id=ref.id, playbook=ref.playbook, decline_expected=ref.decline, agent=agent,
         model=model if agent != "tree" else None, provider=provider if agent != "tree" else None, repeat=repeat,
-        tags=list(ref.tags), score=float(scored["score"]),
+        tags=list(ref.tags), score=float(scored["score"]) if scored["score"] is not None else None,
         coverage_tools=scored["coverage_tools"], coverage_methods=scored["coverage_methods"],
         coverage_gates=scored["coverage_gates"], extraneous=scored["extraneous"],
         forbidden_used=int(scored["forbidden_used"]), decline_correct=scored["decline_correct"],
@@ -913,7 +956,8 @@ def run_plan_bench(
                 logger.warning("case %s failed: %s", ref.id, res.error)
             results.append(res)
             spent += res.cost_usd or 0.0
-            say(f"    score {res.score:.2f}: tools {_pct(res.coverage_tools)}, methods {_pct(res.coverage_methods)}, "
+            say(f"    score {_num(res.score, 2)}: tools {_pct(res.coverage_tools)}, "
+                f"methods {_pct(res.coverage_methods)}, "
                 f"gates {_pct(res.coverage_gates)}, extraneous {_pct(res.extraneous)}, forbidden {res.forbidden_used}, "
                 f"declined {res.declined}" + (f", errors first try {res.validator_errors_first_try}"
                                               if res.validator_errors_first_try else "")
@@ -927,7 +971,7 @@ def run_plan_bench(
 
 
 def rescore_plans(results: Iterable[PlanResult], references: Iterable[Reference] | None = None,
-                  plans_dir: str | Path | None = None) -> list[PlanResult]:
+                  plans_dir: str | Path | None = None, *, reviews: Any = None) -> list[PlanResult]:
     """Score stored rows again from the plans they carry (the steps, or the decline); the agent is not run again.
 
     For a change in a reference or in the formula after a run: ``score``,
@@ -946,8 +990,8 @@ def rescore_plans(results: Iterable[PlanResult], references: Iterable[Reference]
         cand = Candidate(steps=[dict(st, gates=list(st.get("gates") or []), fallback=st.get("fallback"))
                                 for st in r.steps], declined=r.declined, reason=r.declined_reason,
                          branch=r.branch, author=r.author)
-        scored = score_plan(ref, cand)
-        r.score = float(scored["score"])
+        scored = score_plan(ref, cand, reviews=reviews)
+        r.score = float(scored["score"]) if scored["score"] is not None else None
         for key in ("coverage_tools", "coverage_methods", "coverage_gates", "extraneous", "decline_correct"):
             setattr(r, key, scored[key])
         r.forbidden_used = int(scored["forbidden_used"])
@@ -1001,29 +1045,37 @@ def summarize_plans(results: Iterable[PlanResult]) -> list[dict[str, Any]]:
         off_tree = [r for r in solvable if "off_tree" in (r.tags or [])]
         by_repeat: dict[int, list[float]] = {}
         for r in rs:
-            by_repeat.setdefault(int(r.repeat or 0), []).append(r.score if not r.error else 0.0)
+            if r.error or r.score is not None:
+                by_repeat.setdefault(int(r.repeat or 0), []).append(r.score if not r.error else 0.0)
         run_means = [sum(v) / len(v) for v in by_repeat.values() if v]
         by_pb: dict[str, list[float]] = {}
         for r in rs:
-            by_pb.setdefault(r.playbook, []).append(r.score if not r.error else 0.0)
+            if r.error or r.score is not None:
+                by_pb.setdefault(r.playbook, []).append(r.score if not r.error else 0.0)
         cost = [r.cost_usd if r.cost_usd is not None or r.tokens else 0.0 for r in rs]
         rows.append({
             "agent": agent, "model": model or None, "provider": provider or None,
             "n": len(rs), "n_cases": len({r.case_id for r in rs}), "n_solvable": len({r.case_id for r in solvable}),
             "n_decline": len({r.case_id for r in hard}),
-            "repeats": len(by_repeat),
+            "repeats": len({int(r.repeat or 0) for r in rs}),
             "score": _mean([r.score if not r.error else 0.0 for r in rs]),
             "score_solvable": _mean([r.score if not r.error else 0.0 for r in solvable]),
             "score_off_tree": _mean([r.score if not r.error else 0.0 for r in off_tree]),
             "score_min_run": round(min(run_means), 3) if run_means else None,
             "score_max_run": round(max(run_means), 3) if run_means else None,
-            "decline_rate": _mean([bool(r.decline_correct) for r in hard if not r.error]),
-            "false_decline_rate": _mean([r.declined and not r.error for r in solvable]),
+            "decline_rate": _mean([r.decline_correct for r in hard
+                                   if not r.error and r.decline_correct is not None]),
+            "false_decline_rate": _mean([r.declined and r.decline_correct is False for r in solvable
+                                         if not r.error and r.decline_correct is not None]),
+            "review_pending": sum(1 for r in rs if not r.error and r.score is None),
+            "zero_plan_rate": _mean([r.score == 0 for r in rs
+                                     if not r.error and not r.declined and r.score is not None]),
             "coverage_tools": _mean([r.coverage_tools for r in solvable if not r.error]),
             "coverage_methods": _mean([r.coverage_methods for r in solvable if not r.error]),
             "coverage_gates": _mean([r.coverage_gates for r in solvable if not r.error]),
             "extraneous": _mean([r.extraneous for r in solvable if not r.error]),
-            "forbidden_rate": _mean([r.forbidden_used > 0 for r in solvable if not r.error]),
+            "forbidden_rate": _mean([r.forbidden_used > 0 for r in solvable
+                                     if not r.error and not r.declined and r.score is not None]),
             "first_try_valid": _mean([r.first_try_valid for r in rs if not r.error and r.first_try_valid is not None]),
             "fallback_rate": _mean([r.fallback_to_tree for r in rs if not r.error]),
             "tokens_per_case": _mean([r.tokens for r in rs]),
@@ -1057,20 +1109,24 @@ def plan_leaderboard(results: Iterable[PlanResult], *, out: str | Path | None = 
     n_cases = len({r.case_id for r in rs})
     lines = [
         f"## {title or 'AquaScope Bench plan-quality leaderboard'}", "",
-        f"{n_cases} cases, {len(rs)} runs, {len(rows)} agent-model pairs. Score is the mean over every case of the "
+        f"{n_cases} cases, {len(rs)} runs, {len(rows)} agent-model pairs. Score is the mean of judged cases of the "
         "plan-quality score (weights " + ", ".join(f"{k} {v:g}" for k, v in WEIGHTS.items())
-        + "; a declining case scores 1 for a decline and 0 for a plan; an error scores 0); solvable is the mean over "
+        + "; an error scores 0). Answers awaiting review are excluded from score means and counted separately; "
+        "solvable is the mean over "
         "the cases the reference does not decline, off-tree over the cases no single playbook branch covers; spread "
         "is the range of the per-run means when a model was played more than once; declined is the share of "
-        "declining cases the agent refused; false declines are solvable cases it refused; tools, methods and gates "
+        "declining cases with a judged correct refusal; false declines are judged incorrect refusals of solvable "
+        "cases; zero plans are non-refusals with score 0, among judged non-refusals (not all wrong plans); "
+        "tools, methods and gates "
         "are the mean coverage of the reference's required tools, methods and gates; extraneous is the mean share "
         "of a plan's steps the reference does not name; forbidden is the share of plans that use a tool or method "
         "not defensible at the site; valid first try is the share of model plans the validator accepted at once; "
         "tree fallback is the share of plans that are the tree's because the model's did not pass.", "",
         "| agent | model | cases (solvable + decline) | score | solvable | off-tree | spread | declined "
-        "| false declines | tools | methods | gates | extraneous | forbidden | valid first try | tree fallback "
+        "| false declines | zero plans | review pending | tools | methods | gates | extraneous | forbidden "
+        "| valid first try | tree fallback "
         "| tokens/case | s/case | cost USD | errors |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         spread = ("-" if r["repeats"] < 2 or r["score_min_run"] is None
@@ -1079,7 +1135,8 @@ def plan_leaderboard(results: Iterable[PlanResult], *, out: str | Path | None = 
             f"| {r['agent']} | {_label(r)} | {r['n_cases']} ({r['n_solvable']} + {r['n_decline']})"
             + (f" x{r['repeats']}" if r["repeats"] > 1 else "")
             + f" | {_num(r['score'], 2)} | {_num(r['score_solvable'], 2)} | {_num(r['score_off_tree'], 2)} | {spread} "
-            f"| {_pct(r['decline_rate'])} | {_pct(r['false_decline_rate'])} | {_pct(r['coverage_tools'])} "
+            f"| {_pct(r['decline_rate'])} | {_pct(r['false_decline_rate'])} | {_pct(r['zero_plan_rate'])} "
+            f"| {r['review_pending']} | {_pct(r['coverage_tools'])} "
             f"| {_pct(r['coverage_methods'])} | {_pct(r['coverage_gates'])} | {_pct(r['extraneous'])} "
             f"| {_pct(r['forbidden_rate'])} | {_pct(r['first_try_valid'])} | {_pct(r['fallback_rate'])} "
             f"| {_num(r['tokens_per_case'])} | {_num(r['seconds_per_case'], 1)} | {_num(r['cost_usd'], 3)} "
