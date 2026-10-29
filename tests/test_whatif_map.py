@@ -330,6 +330,19 @@ def test_fractional_quantity_does_not_weaken_unit_checks_or_shares():
 
 
 @pytest.mark.parametrize("line, key, value", [
+    ("take half a cubic metre per second", "demand_cms", 0.5),
+    ("take a quarter of a litre per second", "demand_cms", 0.00025),
+    ("half a degree warmer", "dt_c", 0.5),
+    ("half a percent less rain", "dp_pct", -0.5),
+    ("a quarter less rain", "dp_pct", -25.0),
+])
+def test_rules_distinguish_fractional_quantities_from_proportions(line, key, value):
+    result = wm.parse_scenario(line)
+    assert result["matched"], result
+    assert result["scenario"][key] == pytest.approx(value)
+
+
+@pytest.mark.parametrize("line, key, value", [
     ("take 300 litres per second", "demand_cms", 0.3),
     ("take 300 liters a second", "demand_cms", 0.3),
     ("take 300 L/s", "demand_cms", 0.3),

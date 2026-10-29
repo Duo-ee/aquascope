@@ -219,9 +219,16 @@ def _clause(raw: str) -> tuple[str | None, float | None, str]:
     if kind is None:
         return None, None, raw
     value = None
+    converted = False
     for words, v in _FRACTIONS.items():
         if re.search(rf"\b{words}\b", raw):
             value = v
+            token = next((t for t in number_tokens(raw) if t["token"] == words), None)
+            if token and not token["share"] and token["unit"] in UNITS:
+                dimension, factor = UNITS[token["unit"]]
+                if dimension == _UNIT_OF_KEY[kind]:
+                    value = token["value"] * factor
+                    converted = True
             break
     sign_given = False
     if value is None:
@@ -233,7 +240,7 @@ def _clause(raw: str) -> tuple[str | None, float | None, str]:
                 value = -value if m.group("sign") == "-" else value
     if value is None:
         return kind, None, raw
-    if kind == "demand_cms" and re.search(r"\bl/s\b", raw):
+    if kind == "demand_cms" and not converted and re.search(r"\bl/s\b", raw):
         value /= 1000.0
     if not sign_given and kind != "demand_cms":
         if re.search(_NEG, raw):
