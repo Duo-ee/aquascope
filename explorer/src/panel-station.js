@@ -504,7 +504,8 @@ async function runGr4j() {
   try {
     say("Looking up the catchment area…");
     const area = await stationArea(key);
-    if (my !== gr4jRun || cancelled) return;
+    if (my !== gr4jRun) return;
+    if (cancelled) { say("Calibration stopped."); done(); return; }
     if (!area) {
       say("No catchment area for this gauge (it is not in the station catchments table), so flow cannot be expressed in mm/d.", "warn");
       done();
@@ -526,7 +527,8 @@ async function runGr4j() {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Open-Meteo ${resp.status}${resp.status === 429 ? " (rate limit, try again in a minute)" : ""}`);
     const om = await resp.json();
-    if (my !== gr4jRun || cancelled) return;
+    if (my !== gr4jRun) return;
+    if (cancelled) { say("Calibration stopped."); done(); return; }
     const days = om.daily.time, P = om.daily.precipitation_sum, E = om.daily.et0_fao_evapotranspiration;
     const obsByDay = new Map();
     for (let i = 0; i < t.length; i++) obsByDay.set(t[i], v[i]);
@@ -555,7 +557,8 @@ async function runGr4j() {
         say(`Differential evolution: generation ${g}/${G}, best KGE ${best.toFixed(3)}…`);
       },
     });
-    if (my !== gr4jRun || cancelled) return;
+    if (my !== gr4jRun) return;
+    if (cancelled) { say("Calibration stopped."); done(); return; }
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     say("");
     const c = fit.calibration, val = fit.validation || {};

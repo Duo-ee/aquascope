@@ -5,7 +5,7 @@ export function confirmLargeArea(area, warning, message, proceed) {
   if (area <= AREA_WARN_KM2) return { result: Promise.resolve(true), cancel: () => {} };
   message.textContent = `This catchment is ${area.toLocaleString()} km². ` +
     "Forcing is taken at the gauge, not averaged over the catchment, so the fit may be unreliable " +
-    "above 10,000 km². Run it anyway? ";
+    "above the 10,000 km² screening threshold (a judgment, not a fixed physical limit). Run it anyway? ";
   warning.hidden = false;
   let finish;
   const result = new Promise((resolve) => {
