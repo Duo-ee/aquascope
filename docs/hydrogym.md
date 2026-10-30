@@ -195,7 +195,11 @@ aquascope gym leaderboard results/plans-*.jsonl --out leaderboard.md
 References can accept a plan, a decline, or both. A decline's reason is not
 automatically accepted just because it contains a phrase: its score is pending
 until a reviewer records a decision; a missing or blank reason is invalid. The leaderboard excludes pending decisions
-from score means and reports their count. A review file is a JSON array of
+from score means and reports judged/total counts for overall, subset and playbook
+scores. A starred mean is provisional; its interval bounds the full-set mean
+assuming each pending score lies between 0 and 1. Equal counts do not imply
+the same case and repeat identities across agents; compare matching sets only.
+A review file is a JSON array of
 objects containing `case_id`, `reason_sha256`, `rubric_version`, `verdict`
 (`valid` or `invalid`) and a nonempty `explanation`. Compute the two bindings
 from the exact reason and current reference with

@@ -44,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Callable, Iterable
@@ -1037,6 +1038,26 @@ def _mean(values: Iterable[float | None]) -> float | None:
     return round(sum(xs) / len(xs), 3) if xs else None
 
 
+def _score_stats(results: Iterable[PlanResult]) -> dict[str, Any]:
+    """Describe a mean and its possible range while scores await review.
+
+    Errors count as zero, as they do in the leaderboard. Pending scores can
+    range from zero to one; these bounds do not establish matching case sets.
+    """
+    rs = list(results)
+    scores = [0.0 if r.error else r.score for r in rs]
+    judged = [score for score in scores if score is not None]
+    total = len(scores)
+    pending = total - len(judged)
+    return {
+        "mean": _mean(scores),
+        "judged": len(judged),
+        "total": total,
+        "lower": sum(judged) / total if total else None,
+        "upper": (sum(judged) + pending) / total if total else None,
+    }
+
+
 def summarize_plans(results: Iterable[PlanResult]) -> list[dict[str, Any]]:
     """One row per (agent, model): the mean score over all cases and over the solvable ones, the spread across
     repeats, the decline rates, the coverage means, extraneous and forbidden rates, first-try validity, tree
@@ -1054,10 +1075,9 @@ def summarize_plans(results: Iterable[PlanResult]) -> list[dict[str, Any]]:
             if r.error or r.score is not None:
                 by_repeat.setdefault(int(r.repeat or 0), []).append(r.score if not r.error else 0.0)
         run_means = [sum(v) / len(v) for v in by_repeat.values() if v]
-        by_pb: dict[str, list[float]] = {}
+        by_pb: dict[str, list[PlanResult]] = {}
         for r in rs:
-            if r.error or r.score is not None:
-                by_pb.setdefault(r.playbook, []).append(r.score if not r.error else 0.0)
+            by_pb.setdefault(r.playbook, []).append(r)
         cost = [r.cost_usd if r.cost_usd is not None or r.tokens else 0.0 for r in rs]
         rows.append({
             "agent": agent, "model": model or None, "provider": provider or None,
@@ -1065,6 +1085,9 @@ def summarize_plans(results: Iterable[PlanResult]) -> list[dict[str, Any]]:
             "n_decline": len({r.case_id for r in hard}),
             "repeats": len({int(r.repeat or 0) for r in rs}),
             "score": _mean([r.score if not r.error else 0.0 for r in rs]),
+            "score_stats": _score_stats(rs),
+            "score_solvable_stats": _score_stats(solvable),
+            "score_off_tree_stats": _score_stats(off_tree),
             "score_solvable": _mean([r.score if not r.error else 0.0 for r in solvable]),
             "score_off_tree": _mean([r.score if not r.error else 0.0 for r in off_tree]),
             "score_min_run": round(min(run_means), 3) if run_means else None,
@@ -1090,7 +1113,9 @@ def summarize_plans(results: Iterable[PlanResult]) -> list[dict[str, Any]]:
             "seconds_per_case": _mean([r.seconds for r in rs]),
             "cost_usd": round(sum(c for c in cost if c is not None), 4) if all(c is not None for c in cost) else None,
             "errors": sum(1 for r in rs if r.error),
-            "by_playbook": {k: round(sum(v) / len(v), 3) for k, v in sorted(by_pb.items()) if v},
+            "by_playbook": {k: stats["mean"] for k, v in sorted(by_pb.items())
+                            if (stats := _score_stats(v))["mean"] is not None},
+            "by_playbook_stats": {k: _score_stats(v) for k, v in sorted(by_pb.items())},
         })
     return rows
 
@@ -1101,6 +1126,18 @@ def _pct(x: float | None) -> str:
 
 def _num(x: float | None, digits: int = 0) -> str:
     return "-" if x is None else f"{x:,.{digits}f}"
+
+
+def _score_cell(stats: dict[str, Any]) -> str:
+    if not stats["total"]:
+        return "-"
+    mean = _num(stats["mean"], 2)
+    coverage = f"{stats['judged']}/{stats['total']} judged"
+    if stats["judged"] < stats["total"]:
+        lower = math.floor(stats["lower"] * 100) / 100
+        upper = math.ceil(stats["upper"] * 100) / 100
+        return f"{mean}* [{lower:.2f}–{upper:.2f}] ({coverage})"
+    return f"{mean} ({coverage})"
 
 
 def _label(r: dict[str, Any]) -> str:
@@ -1118,7 +1155,10 @@ def plan_leaderboard(results: Iterable[PlanResult], *, out: str | Path | None = 
         f"{n_cases} cases, {len(rs)} runs, {len(rows)} agent-model pairs. Score is the mean of judged cases of the "
         "plan-quality score (weights " + ", ".join(f"{k} {v:g}" for k, v in WEIGHTS.items())
         + "; an error scores 0). Answers awaiting review are excluded from score means and counted separately; "
-        "solvable is the mean over "
+        "A * marks a provisional mean: brackets give the possible full-set mean if each pending score "
+        "is between 0 and 1, with judged/total runs shown for each score. Different agents can have "
+        "different case or repeat identities even when the counts match; compare only matching sets. "
+        "Spread can also be provisional when reviews are pending. Solvable is the mean over "
         "the cases the reference does not decline, off-tree over the cases no single playbook branch covers; spread "
         "is the range of the per-run means when a model was played more than once; declined is the share of "
         "declining cases with a judged correct refusal; false declines are judged incorrect refusals of solvable "
@@ -1140,7 +1180,8 @@ def plan_leaderboard(results: Iterable[PlanResult], *, out: str | Path | None = 
         lines.append(
             f"| {r['agent']} | {_label(r)} | {r['n_cases']} ({r['n_solvable']} + {r['n_decline']})"
             + (f" x{r['repeats']}" if r["repeats"] > 1 else "")
-            + f" | {_num(r['score'], 2)} | {_num(r['score_solvable'], 2)} | {_num(r['score_off_tree'], 2)} | {spread} "
+            + f" | {_score_cell(r['score_stats'])} | {_score_cell(r['score_solvable_stats'])} "
+            f"| {_score_cell(r['score_off_tree_stats'])} | {spread} "
             f"| {_pct(r['decline_rate'])} | {_pct(r['false_decline_rate'])} | {_pct(r['zero_plan_rate'])} "
             f"| {r['review_pending']} | {_pct(r['coverage_tools'])} "
             f"| {_pct(r['coverage_methods'])} | {_pct(r['coverage_gates'])} | {_pct(r['extraneous'])} "
@@ -1148,12 +1189,13 @@ def plan_leaderboard(results: Iterable[PlanResult], *, out: str | Path | None = 
             f"| {_num(r['tokens_per_case'])} | {_num(r['seconds_per_case'], 1)} | {_num(r['cost_usd'], 3)} "
             f"| {r['errors']} |"
         )
-    playbooks = sorted({p for r in rows for p in r["by_playbook"]})
+    playbooks = sorted({p for r in rows for p in r["by_playbook_stats"]})
     if playbooks:
         lines += ["", "Mean score by playbook:", "", "| agent | model | " + " | ".join(playbooks) + " |",
                   "|---|---|" + "---|" * len(playbooks)]
         for r in rows:
-            cells = [f"{r['by_playbook'][p]:.2f}" if p in r["by_playbook"] else "-" for p in playbooks]
+            cells = [_score_cell(r["by_playbook_stats"][p]) if p in r["by_playbook_stats"] else "-"
+                     for p in playbooks]
             lines.append(f"| {r['agent']} | {_label(r)} | " + " | ".join(cells) + " |")
     lines += ["", PRICES_NOTE, ""]
     text = "\n".join(lines)
