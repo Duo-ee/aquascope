@@ -9,6 +9,9 @@ All notable changes to AquaScope are documented here.
 
 ### Fixed
 - **What-if fractional quantities** (#646): the model and keyless readings of “half a cubic metre per second”, “a half litre per second” and “half a degree warmer” keep the stated unit instead of treating the quantity as a proportion.
+
+- **HydroGym decline scoring:** mark refusal reasons for explicit review, support cases that accept a plan or a
+  defensible refusal, and report pending reviews separately instead of treating them as zero scores (#381).
 - **Cite 1.1.0 by its version DOI**: `CITATION.cff`, the README and docs BibTeX, the Explorer's Cite this and the Studio deliverables now name v1.1.0's Zenodo DOI (10.5281/zenodo.23718093).
 
 ## [1.1.0] - 2026-10-28

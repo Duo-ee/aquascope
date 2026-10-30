@@ -86,6 +86,56 @@ def test_validation_catches_an_unknown_tool_a_forbidden_required_step_and_a_miss
     assert any("decline_kind" in e for e in gp.validate_reference(declined))
 
 
+def test_accepted_answer_metadata_round_trips_and_rejects_invalid_shapes():
+    original = BY_ID["gw_regional_potomac"].to_dict()
+    accepted = [{"kind": "plan"}, {"kind": "decline", "reason_must_mention": ["no well"]}]
+    ref = gp.Reference.from_dict({**original, "accepts": accepted})
+    assert gp.Reference.from_dict(ref.to_dict()).accepts == accepted
+    assert gp.validate_reference(ref) == []
+    assert gp.score_plan(ref, {"declined": True, "reason": "no well"})["score"] is None
+    for bad in ([{"kind": "plan"}, {"kind": "decline", "reason_must_mention": []}],
+                [{"kind": "plan"}, {"kind": "bogus"}],
+                [{"kind": "decline", "reason_must_mention": ["no well"]}],
+                [{"kind": "plan"}, {"kind": "plan"}], "not a list"):
+        assert gp.validate_reference(gp.Reference.from_dict({**original, "accepts": bad}))
+
+
+def test_decline_review_is_bound_to_original_reason_and_reference():
+    from aquascope.gym.review import reason_sha256
+
+    ref = BY_ID["gw_regional_potomac"]
+    reason = "No monitored well or groundwater level record exists near Little Falls."
+    record = {"case_id": ref.id, "reason_sha256": reason_sha256(reason), "verdict": "valid",
+              "explanation": "The reconnaissance has no reachable level record.",
+              "rubric_version": gp.decline_rubric_version(ref)}
+    candidate = {"declined": True, "reason": reason}
+    assert gp.score_plan(ref, candidate)["score"] is None
+    assert gp.score_plan(ref, candidate, reviews=[record])["score"] == 1.0
+    assert gp.score_plan(ref, {"declined": True, "reason": reason + "!"}, reviews=[record])["score"] is None
+    changed = gp.Reference.from_dict({**ref.to_dict(), "rationale": "a changed rubric"})
+    assert gp.score_plan(changed, candidate, reviews=[record])["score"] is None
+    bad = {**record, "verdict": "invalid"}
+    assert gp.score_plan(ref, candidate, reviews=[bad])["score"] == 0.0
+
+
+def test_cli_decline_review_json(tmp_path, monkeypatch, capsys):
+    from aquascope.gym.review import reason_sha256
+
+    ref = BY_ID["gw_regional_potomac"]
+    reason = "No monitored well is available."
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps({"declined": True, "reason": reason}), encoding="utf-8")
+    reviews = tmp_path / "reviews.json"
+    reviews.write_text(json.dumps([{"case_id": ref.id, "reason_sha256": reason_sha256(reason),
+                                    "rubric_version": gp.decline_rubric_version(ref), "verdict": "valid",
+                                    "explanation": "The available record does not include a well."}]),
+                       encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["aquascope", "gym", "plans", "score", ref.id, "--candidate", str(candidate),
+                                      "--reviews", str(reviews), "--json"])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)["score"] == 1.0
+
+
 # ── the tree on the saved reconnaissance ──
 
 
@@ -106,7 +156,7 @@ def test_a_perfect_plan_scores_one_and_an_empty_or_declining_plan_zero():
     for ref in REFS:
         if ref.decline:
             yes = gp.score_plan(ref, {"declined": True, "reason": "no", "kind": ref.decline_kind})
-            assert yes["score"] == 1.0 and yes["decline_correct"] is True and yes["coverage_tools"] is None
+            assert yes["score"] is None and yes["decline_correct"] is None and yes["coverage_tools"] is None
             no = gp.score_plan(ref, _perfect(BY_ID["flood_at_site_potomac"]))
             assert no["score"] == 0.0 and no["decline_correct"] is False
             continue
@@ -117,6 +167,9 @@ def test_a_perfect_plan_scores_one_and_an_empty_or_declining_plan_zero():
         empty = gp.score_plan(ref, {"steps": []})
         assert empty["score"] == 0.0 and empty["coverage_tools"] == 0.0 and "no steps" in empty["explain"][0]
         declined = gp.score_plan(ref, {"declined": True, "reason": "cannot"})
+        if ref.accepts:
+            assert declined["score"] is None and declined["decline_correct"] is None
+            continue
         assert declined["score"] == 0.0 and declined["decline_correct"] is False
         assert gp.score_plan(ref.to_dict(), {"status": "declined", "declined_reason": "x"})["score"] == 0.0
 
@@ -269,7 +322,7 @@ def test_the_bench_writes_rows_resumes_and_renders_the_leaderboard(tmp_path):
     assert gb.load_results([out]) == [], "Phase 1 skips plan rows"
     rows = gp.summarize_plans(loaded)
     assert len(rows) == 1 and rows[0]["agent"] == "tree" and rows[0]["n"] == 8 and rows[0]["cost_usd"] == 0.0
-    assert rows[0]["decline_rate"] == 1.0 and rows[0]["false_decline_rate"] == 0.0
+    assert rows[0]["decline_rate"] is None and rows[0]["false_decline_rate"] == 0.0
     text = gp.plan_leaderboard(loaded, out=tmp_path / "lb.md")
     assert "| tree | none | 8 (" in text and (tmp_path / "lb.md").exists() and "Mean score by playbook" in text
     picked = gp.run_plan_bench(None, "tree", case_ids=["flood_at_site_potomac"])
@@ -377,17 +430,17 @@ def test_rescore_reads_the_stored_plans_again_without_running_the_agent(tmp_path
     out = tmp_path / "tree.jsonl"
     rows = gp.run_plan_bench(None, "tree", out=out, case_ids=["offtree_atsite_vs_regional_potomac",
                                                               "flood_inundation_declined_potomac"])
-    assert sorted(r.score for r in rows) == [1.0, 1.0]
+    assert sorted(r.score for r in rows if r.score is not None) == [1.0]
     easier = gp.Reference.from_dict({**BY_ID["offtree_atsite_vs_regional_potomac"].to_dict(), "steps": [
         {"tool": "analyze_station", "method": "trend_mann_kendall"},
         {"tool": "flood_frequency", "method": "at_site_flood_frequency"}]})
     stored = gp.load_plan_results([out], latest=False)
     again = gp.rescore_plans(stored, [easier, BY_ID["flood_inundation_declined_potomac"]])
     by_case = {r.case_id: r.score for r in again}
-    assert by_case["flood_inundation_declined_potomac"] == 1.0
+    assert by_case["flood_inundation_declined_potomac"] is None
     # the composed plan carries the two regional steps, which the easier reference counts as extraneous
     assert by_case["offtree_atsite_vs_regional_potomac"] == pytest.approx(0.94, abs=0.01)
-    assert again[0].explain and all(r.decline_correct for r in again)
+    assert again[0].explain and any(r.decline_correct is None for r in again)
     monkeypatch.setattr(sys, "argv", ["aquascope", "gym", "plans", "rescore", str(out)])
     cli.main()
-    assert sorted(r.score for r in gp.load_plan_results([out])) == [1.0, 1.0], "the package references again"
+    assert sorted(r.score for r in gp.load_plan_results([out]) if r.score is not None) == [1.0]
