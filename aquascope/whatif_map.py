@@ -407,9 +407,16 @@ def scenario_schema(text: str = "") -> dict[str, Any]:
     (:data:`UNITS`) and a part of the year (:data:`SEASONS`). Nothing in it is free text."""
     from aquascope.map_pick import choice
 
-    # Each number as the words write it, and the same value in digits ("twenty" and "20"): either is the
-    # reader's own number.
-    tokens = [x for t in number_tokens(text) for x in (t["token"], None if t["share"] else _g(t["value"])) if x]
+    # Offer a digit alias only if the matcher can read it back as the same value. _g is for display and
+    # can lose precision (a third becomes 0.333); conversion must use the original token's value.
+    tokens = []
+    for t in number_tokens(text):
+        tokens.append(t["token"])
+        if not t["share"]:
+            alias = _g(t["value"])
+            parsed = _token_value(alias)
+            if parsed and math.isclose(t["value"], parsed[0], rel_tol=1e-9):
+                tokens.append(alias)
     number = choice([*tokens, "none"]) if text else {"type": "string", "maxLength": 40}
     return {"type": "object", "required": ["clauses"], "additionalProperties": False, "properties": {
         "clauses": {"type": "array", "maxItems": 4, "items": {
