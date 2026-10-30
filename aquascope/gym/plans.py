@@ -259,17 +259,13 @@ def list_references(plans_dir: str | Path | None = None) -> list[dict[str, Any]]
     return out
 
 
-_RECON_CACHE: dict[str, Any] = {}
+_RECON_CACHE: dict[str, Any] = {}  # Cached playbook pairs, not mutable reconnaissance snapshots.
 
 
 def _load_recon_file(name: str, plans_dir: str | Path | None = None) -> dict[str, Any]:
     root = (Path(plans_dir) / "recon") if plans_dir else RECON_DIR
-    path = root / f"{name}.json"
-    key = str(path)
-    if key not in _RECON_CACHE:
-        with path.open(encoding="utf-8") as fh:
-            _RECON_CACHE[key] = json.load(fh)
-    return _RECON_CACHE[key]
+    with (root / f"{name}.json").open(encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def recon_for(ref: Reference, plans_dir: str | Path | None = None) -> dict[str, Any]:
@@ -640,13 +636,15 @@ def _gate_matches(ref_path: str | None, got_path: str | None) -> bool:
     return got_path == ref_path or got_path.startswith(ref_path + ".")
 
 
-def decline_rubric_version(ref: Reference) -> str:
-    """Bind reviews to the case's entire scoring reference, including its rationale."""
-    raw = json.dumps(ref.to_dict(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+def decline_rubric_version(ref: Reference, plans_dir: str | Path | None = None) -> str:
+    """Bind reviews to the reference and effective saved reconnaissance."""
+    evidence = {"reference": ref.to_dict(), "recon": recon_for(ref, plans_dir)}
+    raw = json.dumps(evidence, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def score_plan(reference: Reference | dict[str, Any], candidate: Any, *, reviews: Any = None) -> dict[str, Any]:
+def score_plan(reference: Reference | dict[str, Any], candidate: Any, *, reviews: Any = None,
+               plans_dir: str | Path | None = None) -> dict[str, Any]:
     """Score a candidate plan against a reference; see the module docstring for the formula.
 
     ``reference`` is a :class:`Reference` or its dict; ``candidate`` is
@@ -668,7 +666,15 @@ def score_plan(reference: Reference | dict[str, Any], candidate: Any, *, reviews
                                               for a in ref.accepts)):
         from aquascope.gym.review import lookup_decline_review
 
-        decision = lookup_decline_review(ref.id, cand.reason, decline_rubric_version(ref), reviews)
+        if not isinstance(cand.reason, str) or not cand.reason.strip():
+            decision = {"verdict": "invalid", "explanation": "decline has no reason"}
+        else:
+            try:
+                version = decline_rubric_version(ref, plans_dir)
+            except (OSError, ValueError, TypeError) as exc:
+                decision = {"verdict": "pending", "explanation": f"reconnaissance unavailable: {type(exc).__name__}"}
+            else:
+                decision = lookup_decline_review(ref.id, cand.reason, version, reviews)
         verdict = decision["verdict"]
         out["decline_correct"] = None if verdict == "pending" else verdict == "valid"
         out["score"] = None if verdict == "pending" else float(verdict == "valid")
@@ -840,7 +846,7 @@ def _now() -> str:
 
 def _result(ref: Reference, agent: str, cfg: _Config, repeat: int, cand: Candidate, detail: dict[str, Any],
             seconds: float) -> PlanResult:
-    scored = score_plan(ref, cand)
+    scored = score_plan(ref, cand, plans_dir=cfg.plans_dir)
     usage = detail.get("usage") or {}
     model = detail.get("model") if detail.get("model") is not None else cfg.model
     provider = detail.get("provider") if detail.get("provider") is not None else cfg.provider
@@ -990,7 +996,7 @@ def rescore_plans(results: Iterable[PlanResult], references: Iterable[Reference]
         cand = Candidate(steps=[dict(st, gates=list(st.get("gates") or []), fallback=st.get("fallback"))
                                 for st in r.steps], declined=r.declined, reason=r.declined_reason,
                          branch=r.branch, author=r.author)
-        scored = score_plan(ref, cand, reviews=reviews)
+        scored = score_plan(ref, cand, reviews=reviews, plans_dir=plans_dir)
         r.score = float(scored["score"]) if scored["score"] is not None else None
         for key in ("coverage_tools", "coverage_methods", "coverage_gates", "extraneous", "decline_correct"):
             setattr(r, key, scored[key])

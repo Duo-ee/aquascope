@@ -444,3 +444,51 @@ def test_rescore_reads_the_stored_plans_again_without_running_the_agent(tmp_path
     monkeypatch.setattr(sys, "argv", ["aquascope", "gym", "plans", "rescore", str(out)])
     cli.main()
     assert sorted(r.score for r in gp.load_plan_results([out]) if r.score is not None) == [1.0]
+
+
+def test_review_binding_uses_selected_live_recon_and_rescore(tmp_path, monkeypatch, capsys):
+    from aquascope.gym.review import reason_sha256
+
+    ref = BY_ID["gw_regional_potomac"]
+    recon_dir = tmp_path / "recon"
+    recon_dir.mkdir()
+    recon_file = recon_dir / f"{ref.recon_name}.json"
+    recon = gp._load_recon_file(ref.recon_name)
+    recon["recon"]["notes"] = ["Custom snapshot"]
+    recon_file.write_text(json.dumps(recon), encoding="utf-8")
+    reason = "No monitored well is available."
+    review = {"case_id": ref.id, "reason_sha256": reason_sha256(reason), "verdict": "valid",
+              "explanation": "No well in this snapshot.", "rubric_version": gp.decline_rubric_version(ref, tmp_path)}
+    candidate = {"declined": True, "reason": reason}
+    (tmp_path / f"{ref.id}.yaml").write_text(open(ref.path, encoding="utf-8").read(), encoding="utf-8")
+    candidate_path, reviews_path = tmp_path / "candidate.json", tmp_path / "reviews.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+    reviews_path.write_text(json.dumps([review]), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["aquascope", "gym", "plans", "score", ref.id, "--candidate",
+                                     str(candidate_path), "--reviews", str(reviews_path), "--plans", str(tmp_path),
+                                     "--json"])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)["score"] == 1.0
+    assert gp.score_plan(ref, candidate, reviews=[review], plans_dir=tmp_path)["score"] == 1.0
+    row = gp.run_plan_bench(None, "tree", case_ids=[ref.id])[0]
+    row.declined, row.declined_reason = True, reason
+    assert gp.rescore_plans([row], [ref], tmp_path, reviews=[review])[0].score == 1.0
+    recon["recon"]["notes"] = ["Changed evidence"]
+    recon_file.write_text(json.dumps(recon), encoding="utf-8")
+    assert gp.score_plan(ref, candidate, reviews=[review], plans_dir=tmp_path)["score"] is None
+    assert gp.rescore_plans([row], [ref], tmp_path, reviews=[review])[0].score is None
+    recon_file.unlink()
+    assert gp.score_plan(ref, candidate, reviews=[review], plans_dir=tmp_path)["score"] is None
+
+
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_decline_without_reason_is_invalid_in_score_rescore_and_summary(reason):
+    ref = BY_ID["gw_regional_potomac"]
+    scored = gp.score_plan(ref, {"declined": True, "reason": reason})
+    assert scored["score"] == 0.0 and scored["decline_correct"] is False
+    row = gp.run_plan_bench(None, "tree", case_ids=[ref.id])[0]
+    row.declined, row.declined_reason = True, reason
+    rescored = gp.rescore_plans([row], [ref])[0]
+    assert rescored.score == 0.0 and rescored.decline_correct is False
+    summary = gp.summarize_plans([rescored])[0]
+    assert summary["score"] == 0.0 and summary["review_pending"] == 0
