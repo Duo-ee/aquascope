@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -492,3 +494,91 @@ def test_decline_without_reason_is_invalid_in_score_rescore_and_summary(reason):
     assert rescored.score == 0.0 and rescored.decline_correct is False
     summary = gp.summarize_plans([rescored])[0]
     assert summary["score"] == 0.0 and summary["review_pending"] == 0
+
+
+def _custom_plans_dir(tmp_path: Path, ref: gp.Reference, recon_payload: Any) -> Path:
+    """A plans directory holding one case and the reconnaissance file given, for bad-shape tests."""
+    plans = tmp_path / "plans"
+    (plans / "recon").mkdir(parents=True)
+    (plans / f"{ref.id}.yaml").write_text(Path(ref.path).read_text(encoding="utf-8"), encoding="utf-8")
+    (plans / "recon" / f"{ref.recon_name}.json").write_text(json.dumps(recon_payload), encoding="utf-8")
+    return plans
+
+
+def _invalid_recon_payloads(ref: gp.Reference) -> dict[str, Any]:
+    """The schema-invalid reconnaissance shapes the reviewer asked to keep pending, with the good file as the base."""
+    good = gp._load_recon_file(ref.recon_name)
+    inner = good["recon"]
+    return {
+        "null root": None,
+        "list root": [],
+        "null recon": {"recon": None},
+        "recon not a mapping": {"recon": []},
+        "sufficiency row not a mapping": {**good, "recon": {**inner, "sufficiency": [None]}},
+        "sufficiency not a list": {**good, "recon": {**inner, "sufficiency": "none"}},
+        "context not a mapping": {**good, "recon": {**inner, "context": [1, 2]}},
+    }
+
+
+@pytest.mark.parametrize("label", list(_invalid_recon_payloads(BY_ID["gw_regional_potomac"])))
+def test_a_schema_invalid_recon_keeps_a_refusal_pending_in_score_and_rescore(tmp_path, label):
+    from aquascope.gym.review import reason_sha256
+
+    ref = BY_ID["gw_regional_potomac"]
+    plans = _custom_plans_dir(tmp_path, ref, gp._load_recon_file(ref.recon_name))
+    reason = "No monitored well is available."
+    candidate = {"declined": True, "reason": reason}
+    review = {"case_id": ref.id, "reason_sha256": reason_sha256(reason), "verdict": "valid",
+              "explanation": "No well in this snapshot.", "rubric_version": gp.decline_rubric_version(ref, plans)}
+    assert gp.score_plan(ref, candidate, reviews=[review], plans_dir=plans)["score"] == 1.0
+    row = gp.run_plan_bench(plans, "tree", case_ids=[ref.id])[0]
+    row.declined, row.declined_reason = True, reason
+    assert gp.rescore_plans([row], [ref], plans, reviews=[review])[0].score == 1.0
+
+    (plans / "recon" / f"{ref.recon_name}.json").write_text(json.dumps(_invalid_recon_payloads(ref)[label]),
+                                                            encoding="utf-8")
+    with pytest.raises(ValueError) as excinfo:
+        gp.recon_for(ref, plans)
+    assert ref.recon_name in str(excinfo.value), "the error names the file so the damage is findable"
+    assert any("ValueError" in e and "recon" in e for e in gp.validate_reference(ref, plans))
+    with pytest.raises(ValueError):
+        gp.workspace_for(ref, plans)
+    scored = gp.score_plan(ref, candidate, reviews=[review], plans_dir=plans)
+    assert scored["score"] is None and scored["decline_correct"] is None
+    assert "reconnaissance unavailable: ValueError" in scored["explain"][-1]
+    rescored = gp.rescore_plans([row], [ref], plans, reviews=[review])[0]
+    assert rescored.score is None and rescored.decline_correct is None
+    summary = gp.summarize_plans([rescored])[0]
+    assert summary["review_pending"] == 1 and summary["errors"] == 0
+    assert summary["score_stats"] == {"mean": None, "judged": 0, "total": 1, "lower": 0.0, "upper": 1.0}
+
+
+@pytest.mark.parametrize("label", ["null root", "list root", "sufficiency row not a mapping"])
+def test_a_schema_invalid_recon_is_a_pending_file_agent_row_not_an_error(tmp_path, label):
+    ref = BY_ID["gw_regional_potomac"]
+    reason = "No monitored well is available."
+    plans = _custom_plans_dir(tmp_path, ref, _invalid_recon_payloads(ref)[label])
+    cands = tmp_path / "candidates"
+    cands.mkdir()
+    (cands / f"{ref.id}.json").write_text(json.dumps({"declined": True, "reason": reason}), encoding="utf-8")
+    results = gp.run_plan_bench(plans, "file", candidates_dir=cands, case_ids=[ref.id])
+    row = results[0]
+    assert row.error is None and row.score is None and row.decline_correct is None and row.declined is True
+    summary = gp.summarize_plans(results)[0]
+    assert summary["review_pending"] == 1 and summary["errors"] == 0
+    assert summary["score_stats"] == {"mean": None, "judged": 0, "total": 1, "lower": 0.0, "upper": 1.0}
+    assert "0/1 judged" in gp.plan_leaderboard(results)
+
+
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_a_refusal_without_a_reason_stays_invalid_when_the_recon_is_invalid(tmp_path, reason):
+    ref = BY_ID["gw_regional_potomac"]
+    plans = _custom_plans_dir(tmp_path, ref, _invalid_recon_payloads(ref)["null root"])
+    scored = gp.score_plan(ref, {"declined": True, "reason": reason}, plans_dir=plans)
+    assert scored["score"] == 0.0 and scored["decline_correct"] is False
+    assert "decline has no reason" in scored["explain"][-1]
+    row = gp.run_plan_bench(None, "tree", case_ids=[ref.id])[0]
+    row.declined, row.declined_reason = True, reason
+    rescored = gp.rescore_plans([row], [ref], plans)[0]
+    assert rescored.score == 0.0 and rescored.decline_correct is False
+    assert gp.summarize_plans([rescored])[0]["review_pending"] == 0

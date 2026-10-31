@@ -263,10 +263,45 @@ def list_references(plans_dir: str | Path | None = None) -> list[dict[str, Any]]
 _RECON_CACHE: dict[str, Any] = {}  # Cached playbook pairs, not mutable reconnaissance snapshots.
 
 
-def _load_recon_file(name: str, plans_dir: str | Path | None = None) -> dict[str, Any]:
+def _recon_path(name: str, plans_dir: str | Path | None = None) -> Path:
     root = (Path(plans_dir) / "recon") if plans_dir else RECON_DIR
-    with (root / f"{name}.json").open(encoding="utf-8") as fh:
+    return root / f"{name}.json"
+
+
+def _load_recon_file(name: str, plans_dir: str | Path | None = None) -> dict[str, Any]:
+    with _recon_path(name, plans_dir).open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _checked_recon(raw: Any, source: Path) -> dict[str, Any]:
+    """The reconnaissance a saved file holds, or ``ValueError`` when its shape cannot be read.
+
+    The file is ``assess_site``'s record, either wrapped as ``{"recon": ...}``
+    or the record itself. A null or list root, a ``recon`` value that is not a
+    mapping, a ``sufficiency`` table that is not a list of mappings, or a
+    ``context`` that is not a mapping would otherwise raise ``AttributeError``
+    out of :func:`recon_for`; the scorers catch this ``ValueError`` instead and
+    keep the refusal pending, since the evidence cannot be checked either way.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"{source}: reconnaissance is {type(raw).__name__}, not a mapping")
+    if "recon" in raw:
+        inner = raw["recon"]
+        if not isinstance(inner, dict):
+            raise ValueError(f"{source}: 'recon' is {type(inner).__name__}, not a mapping")
+        recon = inner
+    else:
+        recon = raw
+    sufficiency = recon.get("sufficiency")
+    if sufficiency is not None and not isinstance(sufficiency, list):
+        raise ValueError(f"{source}: 'sufficiency' is {type(sufficiency).__name__}, not a list")
+    for i, row in enumerate(sufficiency or []):
+        if not isinstance(row, dict):
+            raise ValueError(f"{source}: sufficiency row {i} is {type(row).__name__}, not a mapping")
+    context = recon.get("context")
+    if context is not None and not isinstance(context, dict):
+        raise ValueError(f"{source}: 'context' is {type(context).__name__}, not a mapping")
+    return recon
 
 
 def recon_for(ref: Reference, plans_dir: str | Path | None = None) -> dict[str, Any]:
@@ -275,13 +310,14 @@ def recon_for(ref: Reference, plans_dir: str | Path | None = None) -> dict[str, 
     The file holds ``assess_site(lat, lon)`` with the full sufficiency table;
     the Scout asks for the playbook's problem kind, which narrows the table
     to that problem's methods, so the same narrowing is applied here. A
-    deep copy, so a caller may edit it.
+    deep copy, so a caller may edit it. A file whose shape cannot be read
+    raises ``ValueError`` (see :func:`_checked_recon`).
     """
     from aquascope import playbooks as pbk
     from aquascope.methods import METHODS
 
     raw = _load_recon_file(ref.recon_name, plans_dir)
-    recon = json.loads(json.dumps(raw.get("recon") if isinstance(raw.get("recon"), dict) else raw))
+    recon = json.loads(json.dumps(_checked_recon(raw, _recon_path(ref.recon_name, plans_dir))))
     try:
         problem = pbk.load(ref.playbook).problem
     except pbk.PlaybookError:

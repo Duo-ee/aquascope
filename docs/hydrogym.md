@@ -194,7 +194,11 @@ aquascope gym leaderboard results/plans-*.jsonl --out leaderboard.md
 
 References can accept a plan, a decline, or both. A decline's reason is not
 automatically accepted just because it contains a phrase: its score is pending
-until a reviewer records a decision; a missing or blank reason is invalid. The leaderboard excludes pending decisions
+until a reviewer records a decision; a missing or blank reason is invalid. A gap
+in the evidence also keeps a refusal pending: a missing reconnaissance file,
+malformed JSON, or a decoded record whose shape cannot be read (a null or list
+root, a non-mapping `recon`, a malformed sufficiency table) has no rubric
+version, so the score stays pending rather than becoming a zero. The leaderboard excludes pending decisions
 from score means and reports judged/total counts for overall, subset and playbook
 scores. A starred mean is provisional; its interval bounds the full-set mean
 assuming each pending score lies between 0 and 1. Equal counts do not imply
