@@ -15,6 +15,7 @@ All notable changes to AquaScope are documented here.
   does not read a p = 0.5753 Mann-Kendall result as a trend direction.
 
 ### Changed
+- **Archive counts refreshed** (#443): the 2026-11-02 harvest contains 75,892 catalogued stations and daily observations for 6,231 distinct stations; variable counts in the archive guide now match the observation manifest.
 - **Explorer live smoke diagnostics** (#702): retain catalog boot errors, browser console errors, trace entries and failed HTTP requests when a case fails, to help identify where a cold load stopped.
 - **`poland_imgw` attribution quotes the IMGW-PIB terms verbatim** (#473): the processing notice is now the regulation's own wording, `Dane Instytutu Meteorologii i Gospodarki Wodnej – Państwowego Instytutu Badawczego zostały przetworzone` (§ 5 ust. 4 of the [regulamin](https://danepubliczne.imgw.pl/docs/regulamin_udostepniania_danych.pdf), checked 2026-11-04), instead of the shortened paraphrase; it stays beside the source notice § 5 ust. 3 requires.
 - **`south_africa_dws` license and attribution** (#473): update license to `DWS NIWIS terms (academic, research or personal use)` and attribution to name the Department of Water and Sanitation, Republic of South Africa as copyright proprietor following the disclaimer on [dws.gov.za/niwis2/Disclaimer](https://www.dws.gov.za/niwis2/Disclaimer) (archived at [web.archive.org](http://web.archive.org/web/20250528170949/https://www.dws.gov.za/niwis2/Disclaimer)).
